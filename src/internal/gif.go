@@ -83,8 +83,9 @@ func loadGIF(path string) (*Animator, error) {
 	// 获取画布尺寸
 	width := g.Config.Width
 	height := g.Config.Height
-	pet.Width = int32(width)
-	pet.Height = int32(height)
+	pet.BaseWidth = int32(width)
+	pet.BaseHeight = int32(height)
+	pet.SetScale(Cfg.ScalePercent)
 	
 	// 处理每一帧
 	var prevFrame *image.RGBA

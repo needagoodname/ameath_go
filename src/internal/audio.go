@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"math/rand"
 	"os"
 	"path/filepath"
 
@@ -11,9 +12,9 @@ import (
 )
 
 // 初始化音频
-func initAudio(*audioOn *bool) error {
+func InitAudio() error {
 	if err := speaker.Init(44100, 44100/10); err != nil {
-		*audioOn = false
+		audioOn = false
 		return err
 	}
 	return nil
@@ -21,15 +22,15 @@ func initAudio(*audioOn *bool) error {
 
 // 播放音频
 func playSound(name string) {
-	if !audioOn {
+	if !audioOn || paused {
 		return
 	}
-	
-	file := pet.Sounds[name]
-	if file == "" {
+
+	files := pet.Sounds[name]
+	if len(files) == 0 {
 		return
 	}
-	
+	file := files[rand.Intn(len(files))]
 	go func() {
 		f, err := os.Open(file)
 		if err != nil {

@@ -34,6 +34,7 @@ var (
 	procSetCapture          = user32.NewProc("SetCapture")
 	procReleaseCapture      = user32.NewProc("ReleaseCapture")
 	procLoadCursor          = user32.NewProc("LoadCursorW")
+	procWindowFromPoint     = user32.NewProc("WindowFromPoint")
 )
 
 // Windows API 常量
@@ -49,6 +50,7 @@ const (
 	WM_LBUTTONUP        = 0x0202
 	WM_MOUSEMOVE        = 0x0200
 	WM_TIMER            = 0x0113
+	WM_PAINT            = 0x000F
 	WM_DESTROY          = 0x0002
 	ULW_ALPHA           = 0x00000002
 	AC_SRC_OVER         = 0x00
@@ -70,8 +72,8 @@ type BLENDFUNCTION struct {
 	BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat byte
 }
 
-// 创建窗口
-func createWindow() {
+// 创建窗口并运行消息循环
+func RunMessageLoop() {
 	className, _ := windows.UTF16PtrFromString("PetClass")
 	
 	wcex := &windows.WndClassEx{
@@ -95,8 +97,9 @@ func createWindow() {
 	
 	pet.Hwnd = hwnd
 	
-	procSetTimer.Call(hwnd, 1, 16, 0)  // 60fps
+	procSetTimer.Call(hwnd, 1, 16, 0)   // 60fps
 	procSetTimer.Call(hwnd, 2, 2000, 0) // AI
+	procSetTimer.Call(hwnd, 3, 5000, 0) // 遮挡检测
 	
 	var msg MSG
 	for {
@@ -122,12 +125,20 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		
 	case WM_TIMER:
 		if wParam == 1 {
-			if pet.CurrentAnim != nil {
-				pet.CurrentAnim.Update()
+			if !paused && !away {
+				if pet.CurrentAnim != nil {
+					pet.CurrentAnim.Update()
+				}
+				render()
 			}
-			render()
 		} else if wParam == 2 {
-			updateAI()
+			if !paused && !away {
+				updateAI()
+			}
+		} else if wParam == 3 {
+			if !paused && !pet.Dragging {
+				away = checkOcclusion()
+			}
 		}
 		return 0
 		
@@ -142,6 +153,9 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	case WM_LBUTTONUP:
 		pet.Dragging = false
 		procReleaseCapture.Call(hwnd)
+		Cfg.WindowX = pet.X
+		Cfg.WindowY = pet.Y
+		saveConfig()
 		switchAnim("idle")
 		return 0
 		
@@ -158,6 +172,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	case WM_DESTROY:
 		procKillTimer.Call(hwnd, 1)
 		procKillTimer.Call(hwnd, 2)
+		procKillTimer.Call(hwnd, 3)
 		procPostQuitMessage.Call(0)
 		return 0
 	}
@@ -174,4 +189,24 @@ func getModule() uintptr {
 func loadCursor(id uintptr) uintptr {
 	c, _, _ := procLoadCursor.Call(0, id)
 	return c
+}
+
+func checkOcclusion() bool {
+	if pet.Hwnd == 0 {
+		return false
+	}
+	pts := []POINT{
+		{pet.X + pet.Width/2, pet.Y + pet.Height/2},
+		{pet.X + 2, pet.Y + 2},
+		{pet.X + pet.Width - 2, pet.Y + 2},
+		{pet.X + 2, pet.Y + pet.Height - 2},
+		{pet.X + pet.Width - 2, pet.Y + pet.Height - 2},
+	}
+	for _, pt := range pts {
+		h, _, _ := procWindowFromPoint.Call(uintptr(uint32(pt.X)) | uintptr(uint32(pt.Y))<<32)
+		if h == pet.Hwnd {
+			return false
+		}
+	}
+	return true
 }
