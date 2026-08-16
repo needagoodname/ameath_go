@@ -15,7 +15,7 @@ go build -o ../ameath.exe .
 
 The module is `github.com/na_me/ameath-go`. Source lives in `src/`, binaries go in the repo root. There is no Makefile or go.sum committed yet — run `go mod tidy` after dependency changes.
 
-This is a Windows-only application (`golang.org/x/sys/windows`, `CreateWindowExW`, `UpdateLayeredWindow`). Cross-compilation is not possible.
+This is a Windows-only application (`golang.org/x/sys/windows`, `CreateWindowExW`, `UpdateLayeredWindow`), but all dependencies are pure Go, so cross-compiling from Linux works: `GOOS=windows CGO_ENABLED=0 go build ./...` (used to verify builds; the exe must still be run on Windows).
 
 Assets (GIFs and MP3/WAV files) are loaded from `assets/` next to the executable (`assetsRoot()` in `action.go`, derived from `os.Executable()`; falls back to `./assets`). Structure: `assets/{petName}/{state}/*.gif` + `*.mp3`/`*.wav`. All GIFs in a state directory are merged into one animation: frames concatenated in filename order, canvases normalized to the largest size, each GIF aligned by its feet line (bottom-most opaque row) so variants don't jump.
 

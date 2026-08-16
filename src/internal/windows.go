@@ -18,6 +18,7 @@ var (
 	procTranslateMessage    = user32.NewProc("TranslateMessage")
 	procDispatchMessage     = user32.NewProc("DispatchMessageW")
 	procPostQuitMessage     = user32.NewProc("PostQuitMessage")
+	procPostMessage         = user32.NewProc("PostMessageW")
 	procSetTimer            = user32.NewProc("SetTimer")
 	procKillTimer           = user32.NewProc("KillTimer")
 	procGetDC               = user32.NewProc("GetDC")
@@ -79,6 +80,19 @@ type MSG struct {
 type BLENDFUNCTION struct {
 	BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat byte
 }
+type WndClassEx struct {
+	CbSize        uint32
+	Style         uint32
+	LpfnWndProc   uintptr
+	CbClsExtra    int32
+	CbWndExtra    int32
+	HInstance     windows.Handle
+	HIcon         windows.Handle
+	HCursor       windows.Handle
+	HbrBackground windows.Handle
+	LpszMenuName  *uint16
+	LpszClassName *uint16
+}
 
 // CreateWindow 注册窗口类、创建分层窗口、启动定时器。
 // 必须在托盘启动前调用，保证 postCmd 投递时 hwnd 已存在。
@@ -92,8 +106,8 @@ func (a *App) CreateWindow() {
 
 	className, _ := windows.UTF16PtrFromString("PetClass")
 
-	wcex := &windows.WndClassEx{
-		CbSize:        uint32(unsafe.Sizeof(windows.WndClassEx{})),
+	wcex := &WndClassEx{
+		CbSize:        uint32(unsafe.Sizeof(WndClassEx{})),
 		LpfnWndProc:   windows.NewCallback(wndProc),
 		HInstance:     windows.Handle(getModule()),
 		HCursor:       windows.Handle(loadCursor(32512)),

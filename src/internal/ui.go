@@ -71,7 +71,8 @@ func OnTrayReady() {
 			select {
 			case <-mToggle.ClickedCh:
 				app.postCmd(func() {
-					style, _, _ := procGetWindowLong.Call(app.Pet.Hwnd, GWL_STYLE)
+					gwl := int32(GWL_STYLE)
+					style, _, _ := procGetWindowLong.Call(app.Pet.Hwnd, uintptr(gwl))
 					if style&WS_VISIBLE != 0 {
 						procShowWindow.Call(app.Pet.Hwnd, 0)
 					} else {

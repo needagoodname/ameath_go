@@ -3,9 +3,13 @@ package internal
 import (
 	"os"
 	"path/filepath"
-	"unsafe"
 
-	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
+)
+
+const (
+	autoStartKey   = `Software\Microsoft\Windows\CurrentVersion\Run`
+	autoStartValue = "Ameath"
 )
 
 func exePath() (string, error) {
@@ -23,61 +27,38 @@ func EnableAutoStart() error {
 		return err
 	}
 
-	var key windows.Handle
-	err = windows.RegCreateKeyEx(
-		windows.HKEY_CURRENT_USER,
-		windows.StringToUTF16Ptr(`Software\Microsoft\Windows\CurrentVersion\Run`),
-		0, nil, windows.REG_OPTION_NON_VOLATILE,
-		windows.KEY_SET_VALUE, nil, &key, nil,
-	)
+	k, err := registry.OpenKey(registry.CURRENT_USER, autoStartKey, registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
-	defer windows.RegCloseKey(key)
+	defer k.Close()
 
-	val := windows.StringToUTF16(exe)
-	return windows.RegSetValueEx(
-		key,
-		windows.StringToUTF16Ptr("Ameath"),
-		0, windows.REG_SZ,
-		(*byte)(unsafe.Pointer(&val[0])),
-		uint32(len(val)*2),
-	)
+	return k.SetStringValue(autoStartValue, exe)
 }
 
 // DisableAutoStart 删除注册表中的开机自启项
 func DisableAutoStart() error {
-	var key windows.Handle
-	err := windows.RegOpenKeyEx(
-		windows.HKEY_CURRENT_USER,
-		windows.StringToUTF16Ptr(`Software\Microsoft\Windows\CurrentVersion\Run`),
-		0, windows.KEY_SET_VALUE, &key,
-	)
+	k, err := registry.OpenKey(registry.CURRENT_USER, autoStartKey, registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
-	defer windows.RegCloseKey(key)
+	defer k.Close()
 
-	return windows.RegDeleteValue(key, windows.StringToUTF16Ptr("Ameath"))
+	if err := k.DeleteValue(autoStartValue); err != nil && err != registry.ErrNotExist {
+		return err
+	}
+	return nil
 }
 
 // IsAutoStartEnabled 查询注册表中是否存在开机自启项
 func IsAutoStartEnabled() bool {
-	var key windows.Handle
-	err := windows.RegOpenKeyEx(
-		windows.HKEY_CURRENT_USER,
-		windows.StringToUTF16Ptr(`Software\Microsoft\Windows\CurrentVersion\Run`),
-		0, windows.KEY_QUERY_VALUE, &key,
-	)
+	k, err := registry.OpenKey(registry.CURRENT_USER, autoStartKey, registry.QUERY_VALUE)
 	if err != nil {
 		return false
 	}
-	defer windows.RegCloseKey(key)
+	defer k.Close()
 
-	_, err = windows.RegQueryValueEx(
-		key, windows.StringToUTF16Ptr("Ameath"),
-		nil, nil, nil, nil,
-	)
+	_, _, err = k.GetStringValue(autoStartValue)
 	return err == nil
 }
 
