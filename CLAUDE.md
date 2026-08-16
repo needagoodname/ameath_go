@@ -8,14 +8,29 @@ A Windows desktop pet application ("爱弥斯") — an animated character that w
 
 ## Build & run
 
+Windows 编译（`-H windowsgui` 设置 GUI 子系统，双击启动不弹控制台窗口）：
+
 ```bash
 cd src
-go build -o ../ameath.exe .
+go build -ldflags="-H windowsgui" -o ../ameath.exe .
+```
+
+运行（exe 需与 `assets/` 目录同级）：
+
+```bash
+../ameath.exe
+```
+
+若需在命令行查看 `println` 调试输出，去掉 `-ldflags="-H windowsgui"` 编译成控制台版本即可。
+
+Linux 交叉编译验证（纯 Go 依赖，产物仍需在 Windows 运行）：
+
+```bash
+cd src
+GOOS=windows CGO_ENABLED=0 go build ./...
 ```
 
 The module is `github.com/na_me/ameath-go`. Source lives in `src/`, binaries go in the repo root. There is no Makefile or go.sum committed yet — run `go mod tidy` after dependency changes.
-
-This is a Windows-only application (`golang.org/x/sys/windows`, `CreateWindowExW`, `UpdateLayeredWindow`), but all dependencies are pure Go, so cross-compiling from Linux works: `GOOS=windows CGO_ENABLED=0 go build ./...` (used to verify builds; the exe must still be run on Windows).
 
 Assets (GIFs and MP3/WAV files) are loaded from `assets/` next to the executable (`assetsRoot()` in `action.go`, derived from `os.Executable()`; falls back to `./assets`). Structure: `assets/{petName}/{state}/*.gif` + `*.mp3`/`*.wav`. Each GIF is a separate animation variant (`Anims map[string][]*Animator`); all variants are normalized to a common canvas and feet line (bottom-most opaque row) so nothing jumps. `switchAnim` picks a random variant; in idle, `updateAI` re-picks a random variant every ~10s. Tray icon: `assets/{petName}/icon.ico` or `assets/icon.ico` if present, else generated as a 32×32 ICO from the first idle frame (`icon.go`, stored in `App.TrayIcon` before systray starts).
 

@@ -12,6 +12,7 @@ type Pet struct {
 	TargetX     int32
 	TargetY     int32
 	Dragging    bool
+	DragMoved   bool
 	DragX       int32
 	DragY       int32
 	Anims       map[string][]*Animator

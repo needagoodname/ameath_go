@@ -124,7 +124,13 @@ func (a *App) updateAI() {
 			p.StateTimer = 0
 		}
 
-	case "click", "eat", "happy":
+	case "click":
+		if p.StateTimer > 1 {
+			a.switchAnim("idle")
+			p.StateTimer = 0
+		}
+
+	case "eat", "happy":
 		if p.StateTimer > 5 {
 			a.switchAnim("idle")
 			p.StateTimer = 0
@@ -423,6 +429,7 @@ func (a *App) render() {
 		println("UpdateLayeredWindow failed")
 	} else if !a.RenderedOnce {
 		a.RenderedOnce = true
+		procShowWindow.Call(p.Hwnd, SW_SHOWNOACTIVATE)
 		println("first render ok at", p.X, ",", p.Y, "size:", p.Width, "x", p.Height)
 	}
 }

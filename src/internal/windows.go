@@ -137,10 +137,11 @@ func (a *App) CreateWindow() {
 	// 注意：不加 WS_EX_TRANSPARENT，否则整个窗口会变成鼠标穿透，
 	// 宠物无法接收点击。透明区域点击穿透由 UpdateLayeredWindow 的
 	// per-pixel alpha（ULW_ALPHA + AC_SRC_ALPHA）自动处理。
+	// 先不带 WS_VISIBLE，等首帧渲染成功后再显示，避免启动时闪现黑框。
 	hwnd, _, _ := procCreateWindowEx.Call(
 		WS_EX_LAYERED|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
 		uintptr(unsafe.Pointer(className)),
-		0, WS_POPUP|WS_VISIBLE,
+		0, WS_POPUP,
 		uintptr(a.Pet.X), uintptr(a.Pet.Y),
 		uintptr(a.Pet.Width), uintptr(a.Pet.Height),
 		0, 0, uintptr(wcex.HInstance), 0,
@@ -215,6 +216,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 
 	case WM_LBUTTONDOWN:
 		app.Pet.Dragging = true
+		app.Pet.DragMoved = false
 		app.Pet.DragX = int32(int16(lParam & 0xFFFF))
 		app.Pet.DragY = int32(int16(lParam >> 16))
 		procSetCapture.Call(hwnd)
@@ -227,7 +229,11 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		app.Cfg.WindowX = app.Pet.X
 		app.Cfg.WindowY = app.Pet.Y
 		app.saveConfig()
-		app.switchAnim("idle")
+		// 快速点击（未拖动）保持 click 状态，让反应动画可见；
+		// 拖动结束则立即回到 idle。点击态由 AI 超时后回到 idle。
+		if app.Pet.DragMoved {
+			app.switchAnim("idle")
+		}
 		return 0
 
 	case WM_MOUSEMOVE:
@@ -236,6 +242,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 			y := int32(int16(lParam >> 16))
 			app.Pet.X += x - app.Pet.DragX
 			app.Pet.Y += y - app.Pet.DragY
+			app.Pet.DragMoved = true
 			procSetWindowPos.Call(hwnd, 0, uintptr(app.Pet.X), uintptr(app.Pet.Y), 0, 0, 1|4)
 		}
 		return 0
