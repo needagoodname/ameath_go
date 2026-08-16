@@ -17,7 +17,7 @@ The module is `github.com/na_me/ameath-go`. Source lives in `src/`, binaries go 
 
 This is a Windows-only application (`golang.org/x/sys/windows`, `CreateWindowExW`, `UpdateLayeredWindow`), but all dependencies are pure Go, so cross-compiling from Linux works: `GOOS=windows CGO_ENABLED=0 go build ./...` (used to verify builds; the exe must still be run on Windows).
 
-Assets (GIFs and MP3/WAV files) are loaded from `assets/` next to the executable (`assetsRoot()` in `action.go`, derived from `os.Executable()`; falls back to `./assets`). Structure: `assets/{petName}/{state}/*.gif` + `*.mp3`/`*.wav`. All GIFs in a state directory are merged into one animation: frames concatenated in filename order, canvases normalized to the largest size, each GIF aligned by its feet line (bottom-most opaque row) so variants don't jump.
+Assets (GIFs and MP3/WAV files) are loaded from `assets/` next to the executable (`assetsRoot()` in `action.go`, derived from `os.Executable()`; falls back to `./assets`). Structure: `assets/{petName}/{state}/*.gif` + `*.mp3`/`*.wav`. Each GIF is a separate animation variant (`Anims map[string][]*Animator`); all variants are normalized to a common canvas and feet line (bottom-most opaque row) so nothing jumps. `switchAnim` picks a random variant; in idle, `updateAI` re-picks a random variant every ~10s. Tray icon: `assets/{petName}/icon.ico` or `assets/icon.ico` if present, else generated as a 32×32 ICO from the first idle frame (`icon.go`, stored in `App.TrayIcon` before systray starts).
 
 ## Architecture
 
@@ -31,6 +31,7 @@ src/
     ├── gif.go           # Frame/Animator types, GIF decoding with disposal handling
     ├── audio.go         # Audio init (beep/speaker), MP3/WAV playback
     ├── windows.go       # Win32 API bindings, window creation, message loop, wndProc, occlusion
+    ├── icon.go          # Tray icon: icon.ico loading / 32×32 ICO generation from first frame
     ├── ui.go            # Systray menu and event handlers
     ├── autostart.go     # Registry-based auto-start
     └── config.go        # JSON config persistence
@@ -55,7 +56,7 @@ tray goroutines                  main thread (message loop/wndProc/timers)
 
 ### Core data flow
 
-1. `main()` calls `internal.NewApp()`, then `LoadConfig` → `DiscoverPets` → `NewPet` → `InitAudio` → `LoadResources` → `SyncAutoStart` → `CreateWindow` → `go systray.Run(OnTrayReady, OnTrayExit)` → `RunMessageLoop` → `systray.Quit()`.
+1. `main()` calls `internal.NewApp()`, then `LoadConfig` → `DiscoverPets` → `NewPet` → `InitAudio` → `LoadResources` → `LoadTrayIcon` → `SyncAutoStart` → `CreateWindow` → `go systray.Run(OnTrayReady, OnTrayExit)` → `RunMessageLoop` → `systray.Quit()`.
 2. Three timers drive the app: 16ms (~60fps, animation + `updateMovement` + render), 2s (AI state transitions), 5s (occlusion detection).
 3. `wndProc` handles mouse events (drag, click), timer ticks, `WM_APP_EXEC_CMD` (drain command channel), `WM_APP_QUIT`, and `WM_DESTROY`.
 4. `OnTrayReady()` (in `ui.go`) sets up a systray menu; every handler posts a closure via `app.postCmd`.
@@ -65,7 +66,7 @@ tray goroutines                  main thread (message loop/wndProc/timers)
 ### Key types
 
 - **`App`** (`app.go`): aggregates all state — `Pet`, `Cfg`, `AudioOn/Paused/Away` flags, discovered `Pets`, screen size, `cmdChan`. Package-level singleton `app` (required because the `wndProc` callback signature can't carry a receiver).
-- **`Pet`** (`pet.go`): holds position, size, state, animation map, sound map, window handle, drag state.
+- **`Pet`** (`pet.go`): holds position, size, state, animation variant map, sound map, window handle, drag state.
 - **`Animator`** (`gif.go`): frame array with playback control (current frame, loop count, timing) plus `Width/Height` (canvas size). Thread-safe via `sync.RWMutex`.
 - **`Frame`** (`gif.go`): an `*image.RGBA` plus a `time.Duration` delay.
 
@@ -74,4 +75,4 @@ tray goroutines                  main thread (message loop/wndProc/timers)
 - **No `go.sum` committed**: run `go mod tidy` (on a Windows machine with the Go toolchain) to generate it.
 - **Rendering allocates per frame**: `render()` creates a DIB section + compatible DC every frame (60fps) and re-converts pixels in Go. Frames could be pre-converted to BGRA and scaled versions cached.
 - **Occlusion heuristic**: `checkOcclusion()` samples 5 points near the sprite center and requires alpha ≥ 32; a pet whose center pixels are transparent could still be misdetected as occluded.
-- **Menu construction reads startup-only state**: `OnTrayReady` reads `Cfg`/`Pet.Name`/`Pets` without synchronization; safe because no writers exist at that point, but don't add post-startup mutations there.
+- **Menu construction reads startup-only state**: `OnTrayReady` reads `Cfg`/`Pet.Name`/`Pets`/`TrayIcon` without synchronization; safe because no writers exist at that point, but don't add post-startup mutations there.

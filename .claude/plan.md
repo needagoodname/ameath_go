@@ -243,3 +243,44 @@ ameath.gif（1000×1000）、ameath.ico、ameath_content.png、screen1-7.gif（�
 2. idle 状态依次轮播 4 个变体（约 2.7s/个），变体间无垂直跳动
 3. idle ↔ walk ↔ click 切换无跳动；拖动时 drag 动画正常
 4. 语音文件由用户放入对应状态目录后，状态切换时随机播放
+
+---
+
+# 托盘图标接入 + idle 多变体随机播放 + 菜单 GIF 过滤
+
+## Context
+
+用户反馈：1) 托盘无图标只是空白；2) 行为列表与 GIF 资源不匹配。
+
+排查结论：
+
+1. `systray.SetTitle` 在 Windows 上是空实现，且代码从未调用 `systray.SetIcon`，托盘一直显示库默认图标；共享文件夹 gifs/ 中已有 `ameath.ico`（此前计划不入库）但未接线。
+2. 用户明确状态使用规则：idle 的 GIF 隔一定时间间隔**随机**播放（取代「资源组织」计划中的顺序合并轮播）；click 不进菜单、点击宠物时播放（现状已满足）；walk 不进菜单、移动时使用（现状已满足）。
+
+## 修改文件
+
+### 1. `src/internal/pet.go` / `action.go` / `gif.go`：每状态多变体
+
+- `Anims` 类型改为 `map[string][]*Animator`（每状态多个变体）。
+- `LoadResources` 不再合并同状态 GIF：逐个 GIF 独立加载为变体，全部变体全局归一化画布与脚线（净位移与原「状态内合并+全局归一化」等效）。
+- 删除 `gif.go` 的 `loadGIFs`/`mergedLoopCount`（合并逻辑不再需要）。
+- `switchAnim` 随机选取变体；音效只在状态真正变化时播放，同状态换变体不重复响。
+- `updateAI` idle 分支：`StateTimer%5 == 0`（约 10s）随机换一个 idle 变体。
+
+### 2. `src/internal/action.go`：菜单状态过滤
+
+- `MenuStates` 只收录含 `*.gif` 的状态目录（此前仅按目录存在性判断，无 GIF 的目录也会进菜单）。
+- `HasMenuState` 适配变体数组。`internalStates`（walk/click 隐藏）保持不变。
+
+### 3. 托盘图标（新增 `src/internal/icon.go`）
+
+- 启动期（systray 前）生成图标字节存入 `App.TrayIcon`：优先读 `assets/{petName}/icon.ico`、`assets/icon.ico`，否则用 idle 首帧最近邻缩放到 32×32 并编码为 ICO（32bpp BGRA + 全 0 AND 掩码）。
+- `OnTrayReady` 调 `systray.SetIcon`，删除 Windows 上无效果的 `SetTitle` 调用。
+- `ameath.ico` 可由用户放到 `assets/ameath/icon.ico` 以使用原图。
+
+## 验证方式
+
+1. `cd src && go build -o ../ameath.exe .` 编译通过
+2. 托盘显示宠物图标（无 icon.ico 时为自动生成的 32×32 图标）
+3. idle 状态下每约 10s 随机切换 idle1~4 变体，变体间无垂直跳动
+4. 行为菜单只含 idle；点击宠物播放 click 反应；walk 仅移动时使用

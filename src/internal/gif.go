@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"fmt"
 	"image"
 	"image/draw"
 	"image/gif"
@@ -125,50 +124,6 @@ func loadGIF(path string) (*Animator, error) {
 	return anim, nil
 }
 
-// loadGIFs 加载目录下全部 GIF 并合并为单个 Animator：
-// 帧序列按文件名顺序拼接，画布取最大尺寸，各 GIF 按脚线对齐。
-// 返回合并后的 Animator 及其脚线（全部帧非透明底边的最大行索引）。
-func loadGIFs(paths []string) (*Animator, int, error) {
-	anims := make([]*Animator, 0, len(paths))
-	feet := make([]int, 0, len(paths))
-	maxW, maxH, maxFeet := 0, 0, 0
-	for _, p := range paths {
-		anim, err := loadGIF(p)
-		if err != nil {
-			println("Failed to load", p, ":", err.Error())
-			continue
-		}
-		anims = append(anims, anim)
-		f := animFeet(anim)
-		feet = append(feet, f)
-		if anim.Width > maxW {
-			maxW = anim.Width
-		}
-		if anim.Height > maxH {
-			maxH = anim.Height
-		}
-		if f > maxFeet {
-			maxFeet = f
-		}
-	}
-	if len(anims) == 0 {
-		return nil, 0, fmt.Errorf("no valid gif")
-	}
-
-	merged := &Animator{
-		LoopCount: mergedLoopCount(anims),
-		Width:     maxW,
-		Height:    maxH,
-	}
-	for i, anim := range anims {
-		oy := maxFeet - feet[i]
-		for _, fr := range anim.Frames {
-			merged.Frames = append(merged.Frames, padFrame(fr, maxW, maxH, oy))
-		}
-	}
-	return merged, maxFeet, nil
-}
-
 // animFeet 返回动画全部帧的非透明底边最大值（0-based 行索引，脚线）。
 func animFeet(a *Animator) int {
 	maxBottom := 0
@@ -191,20 +146,6 @@ func animFeet(a *Animator) int {
 		}
 	}
 	return maxBottom
-}
-
-// mergedLoopCount 任一源 GIF 无限循环则整体无限，否则取最大循环数。
-func mergedLoopCount(anims []*Animator) int {
-	n := 0
-	for _, a := range anims {
-		if a.LoopCount == 0 {
-			return 0
-		}
-		if a.LoopCount > n {
-			n = a.LoopCount
-		}
-	}
-	return n
 }
 
 // padFrame 将帧平铺到 w×h 画布，内容整体下移 oy（超出画布部分裁剪）。

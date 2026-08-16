@@ -14,7 +14,7 @@ type Pet struct {
 	Dragging    bool
 	DragX       int32
 	DragY       int32
-	Anims       map[string]*Animator
+	Anims       map[string][]*Animator
 	CurrentAnim *Animator
 	Sounds      map[string][]string
 	Hwnd        uintptr
@@ -29,7 +29,7 @@ func (a *App) NewPet(name string) {
 		Y:       a.Cfg.WindowY,
 		Width:   128,
 		Height:  128,
-		Anims:   make(map[string]*Animator),
+		Anims:   make(map[string][]*Animator),
 		Sounds:  make(map[string][]string),
 	}
 	if a.Pet.X == 0 && a.Pet.Y == 0 {

@@ -26,14 +26,18 @@ func assetsRoot() string {
 	return filepath.Join(filepath.Dir(exe), "assets")
 }
 
-// MenuStates 返回所有可用宠物的菜单可见状态合集
+// MenuStates 返回所有可用宠物的菜单可见状态合集（只收录含 GIF 的状态目录）
 func (a *App) MenuStates() []string {
 	set := map[string]bool{}
 	for _, name := range a.Pets {
 		dir := filepath.Join(assetsRoot(), name)
 		entries, _ := os.ReadDir(dir)
 		for _, e := range entries {
-			if e.IsDir() && !internalStates[e.Name()] {
+			if !e.IsDir() || internalStates[e.Name()] {
+				continue
+			}
+			gifs, _ := filepath.Glob(filepath.Join(dir, e.Name(), "*.gif"))
+			if len(gifs) > 0 {
 				set[e.Name()] = true
 			}
 		}
@@ -48,31 +52,39 @@ func (a *App) MenuStates() []string {
 
 // HasMenuState 判断当前宠物是否有某个菜单可见状态
 func (a *App) HasMenuState(state string) bool {
-	_, ok := a.Pet.Anims[state]
-	return ok && !internalStates[state]
+	vs, ok := a.Pet.Anims[state]
+	return ok && len(vs) > 0 && !internalStates[state]
 }
 
-// switchAnim 切换动画（仅主线程调用）
+// switchAnim 切换动画（仅主线程调用）。同状态多个变体（如 idle1~4）随机选取。
 func (a *App) switchAnim(state string) {
 	p := a.Pet
 	if a.Paused {
 		return
 	}
-	if anim, ok := p.Anims[state]; ok && anim != p.CurrentAnim {
-		if p.CurrentAnim != nil {
-			p.CurrentAnim.Playing = false
-		}
-		p.CurrentAnim = anim
-		p.CurrentAnim.Current = 0
-		p.CurrentAnim.CurrentLoop = 0
-		p.CurrentAnim.Playing = true
-		p.CurrentAnim.LastUpdate = time.Now()
-		p.State = state
-		p.StateTimer = 0
+	vs := p.Anims[state]
+	if len(vs) == 0 {
+		return
+	}
+	anim := vs[rand.Intn(len(vs))]
+	if anim == p.CurrentAnim {
+		return
+	}
+	if p.CurrentAnim != nil {
+		p.CurrentAnim.Playing = false
+	}
+	changed := p.State != state
+	p.CurrentAnim = anim
+	p.CurrentAnim.Current = 0
+	p.CurrentAnim.CurrentLoop = 0
+	p.CurrentAnim.Playing = true
+	p.CurrentAnim.LastUpdate = time.Now()
+	p.State = state
+	p.StateTimer = 0
 
-		if a.AudioOn {
-			a.playSound(state)
-		}
+	// 同状态换变体（如 idle 随机轮换）不重复播放音效
+	if a.AudioOn && changed {
+		a.playSound(state)
 	}
 }
 
@@ -95,6 +107,9 @@ func (a *App) updateAI() {
 			)
 		} else if p.StateTimer > 20 && rand.Intn(5) == 0 {
 			a.switchAnim("sleep")
+		} else if p.StateTimer > 0 && p.StateTimer%5 == 0 {
+			// 每 10s 随机换一个 idle 变体
+			a.switchAnim("idle")
 		}
 
 	case "walk":
@@ -162,6 +177,7 @@ func (a *App) DiscoverPets() {
 
 // LoadResources 加载当前宠物的 GIF 动画和音频文件
 // 资产结构: assets/{petName}/{state}/{name}.gif + {name}.mp3/wav
+// 每个 GIF 独立为一个动画变体（如 idle1~4），播放时随机选取。
 // 资源先加载到临时 map，全部成功后才提交（供 SwitchPet 回滚）。
 func (a *App) LoadResources() error {
 	p := a.Pet
@@ -171,8 +187,8 @@ func (a *App) LoadResources() error {
 		return err
 	}
 
-	anims := make(map[string]*Animator)
-	feetOf := make(map[string]int)
+	anims := make(map[string][]*Animator)
+	feetOf := make(map[*Animator]int)
 	sounds := make(map[string][]string)
 
 	for _, e := range entries {
@@ -182,14 +198,13 @@ func (a *App) LoadResources() error {
 		state := e.Name()
 		stateDir := filepath.Join(petDir, state)
 
-		// 加载目录下全部 GIF 并合并为一个动画
 		gifs, _ := filepath.Glob(filepath.Join(stateDir, "*.gif"))
-		if len(gifs) > 0 {
-			if anim, feet, err := loadGIFs(gifs); err == nil {
-				anims[state] = anim
-				feetOf[state] = feet
+		for _, path := range gifs {
+			if anim, err := loadGIF(path); err == nil {
+				anims[state] = append(anims[state], anim)
+				feetOf[anim] = animFeet(anim)
 			} else {
-				println("Failed to load gifs in", stateDir, ":", err.Error())
+				println("Failed to load", path, ":", err.Error())
 			}
 		}
 
@@ -204,14 +219,16 @@ func (a *App) LoadResources() error {
 		}
 	}
 
-	// 全局归一化：统一画布尺寸与脚线，避免状态切换时精灵跳动
+	// 全局归一化：全部变体统一画布尺寸与脚线，避免状态/变体切换时精灵跳动
 	baseW, baseH, baseFeet := 0, 0, 0
-	for _, anim := range anims {
-		if anim.Width > baseW {
-			baseW = anim.Width
-		}
-		if anim.Height > baseH {
-			baseH = anim.Height
+	for _, vs := range anims {
+		for _, anim := range vs {
+			if anim.Width > baseW {
+				baseW = anim.Width
+			}
+			if anim.Height > baseH {
+				baseH = anim.Height
+			}
 		}
 	}
 	for _, feet := range feetOf {
@@ -219,18 +236,22 @@ func (a *App) LoadResources() error {
 			baseFeet = feet
 		}
 	}
-	for state, anim := range anims {
-		anim.normalizeFrames(baseW, baseH, baseFeet-feetOf[state])
+	for _, vs := range anims {
+		for _, anim := range vs {
+			anim.normalizeFrames(baseW, baseH, baseFeet-feetOf[anim])
+		}
 	}
 
-	// 默认动画：优先 idle，否则取第一个；无任何动画视为加载失败
+	// 默认动画：优先 idle 首个变体，否则取第一个；无任何动画视为加载失败
 	var base *Animator
-	if anim, ok := anims["idle"]; ok {
-		base = anim
+	if vs := anims["idle"]; len(vs) > 0 {
+		base = vs[0]
 	} else {
-		for _, anim := range anims {
-			base = anim
-			break
+		for _, vs := range anims {
+			if len(vs) > 0 {
+				base = vs[0]
+				break
+			}
 		}
 	}
 	if base == nil {
@@ -245,7 +266,12 @@ func (a *App) LoadResources() error {
 	p.CurrentAnim = base
 	p.CurrentAnim.Playing = true
 	p.CurrentAnim.LastUpdate = time.Now()
-	println("loaded", p.Name, "anims:", len(anims), "sounds:", len(sounds),
+	variants := 0
+	for _, vs := range anims {
+		variants += len(vs)
+	}
+	println("loaded", p.Name, "states:", len(anims), "variants:", variants,
+		"sounds:", len(sounds),
 		"base:", p.BaseWidth, "x", p.BaseHeight, "scale:", a.Cfg.ScalePercent)
 	return nil
 }
@@ -264,7 +290,7 @@ func (a *App) SwitchPet(name string) error {
 	oldCurrent := p.CurrentAnim
 	oldName := p.Name
 
-	p.Anims = make(map[string]*Animator)
+	p.Anims = make(map[string][]*Animator)
 	p.Sounds = make(map[string][]string)
 	p.CurrentAnim = nil
 	p.Name = name

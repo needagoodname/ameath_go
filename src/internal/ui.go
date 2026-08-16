@@ -9,7 +9,9 @@ import (
 // 系统托盘
 func OnTrayReady() {
 	println("tray ready")
-	systray.SetTitle("🐱")
+	if len(app.TrayIcon) > 0 {
+		systray.SetIcon(app.TrayIcon)
+	}
 	systray.SetTooltip("桌宠")
 
 	systray.AddMenuItem("桌宠", "").Disable()

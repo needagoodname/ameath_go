@@ -45,6 +45,9 @@ func main() {
 		println("Load resources failed:", err.Error())
 	}
 
+	// 托盘图标（systray 启动前生成，避免托盘 goroutine 读宠物状态）
+	app.LoadTrayIcon()
+
 	// 同步开机自启状态
 	app.SyncAutoStart()
 

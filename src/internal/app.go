@@ -18,6 +18,7 @@ type App struct {
 	ScreenH int32
 
 	RenderedOnce bool
+	TrayIcon     []byte
 
 	cmdChan chan func()
 }
