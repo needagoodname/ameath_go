@@ -134,8 +134,11 @@ func (a *App) CreateWindow() {
 		println("RegisterClassEx failed, err:", getLastError())
 	}
 
+	// 注意：不加 WS_EX_TRANSPARENT，否则整个窗口会变成鼠标穿透，
+	// 宠物无法接收点击。透明区域点击穿透由 UpdateLayeredWindow 的
+	// per-pixel alpha（ULW_ALPHA + AC_SRC_ALPHA）自动处理。
 	hwnd, _, _ := procCreateWindowEx.Call(
-		WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
+		WS_EX_LAYERED|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
 		uintptr(unsafe.Pointer(className)),
 		0, WS_POPUP|WS_VISIBLE,
 		uintptr(a.Pet.X), uintptr(a.Pet.Y),

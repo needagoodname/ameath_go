@@ -87,27 +87,38 @@ func loadGIF(path string) (*Animator, error) {
 	width := g.Config.Width
 	height := g.Config.Height
 
-	// 处理每一帧
-	var prevFrame *image.RGBA
+	// 合成每一帧：维护持久画布，按 GIF89a disposal 规范处理，
+	// 避免上一帧内容残留到下一帧造成残影。
+	//   DisposalBackground → 下一帧前清空为透明
+	//   DisposalPrevious  → 下一帧前恢复为上一帧绘制前的快照
+	//   DisposalNone      → 保留画布
+	canvas := image.NewRGBA(image.Rect(0, 0, width, height))
+	snapshots := make([]*image.RGBA, len(g.Image))
 
 	for i, srcImg := range g.Image {
 		bounds := srcImg.Bounds()
 
-		// 创建 RGBA 画布
-		rgba := image.NewRGBA(image.Rect(0, 0, width, height))
-
-		// 处理 GIF 的 disposal 方法
-		if i > 0 && g.Disposal[i-1] != gif.DisposalNone && prevFrame != nil {
-			// 复制上一帧作为基础
-			draw.Draw(rgba, rgba.Bounds(), prevFrame, image.Point{}, draw.Src)
+		if i > 0 {
+			switch g.Disposal[i-1] {
+			case gif.DisposalBackground:
+				draw.Draw(canvas, canvas.Bounds(), image.Transparent, image.Point{}, draw.Src)
+			case gif.DisposalPrevious:
+				if snapshots[i-1] != nil {
+					draw.Draw(canvas, canvas.Bounds(), snapshots[i-1], image.Point{}, draw.Src)
+				}
+			}
 		}
 
-		// 绘制当前帧
-		draw.Draw(rgba, bounds, srcImg, bounds.Min, draw.Over)
+		// 记录绘制前的画布快照，供 DisposalPrevious 恢复
+		snapshots[i] = image.NewRGBA(canvas.Bounds())
+		draw.Draw(snapshots[i], snapshots[i].Bounds(), canvas, image.Point{}, draw.Src)
 
-		// 保存为前一帧
-		prevFrame = image.NewRGBA(rgba.Bounds())
-		draw.Draw(prevFrame, prevFrame.Bounds(), rgba, image.Point{}, draw.Src)
+		// 绘制当前帧
+		draw.Draw(canvas, bounds, srcImg, bounds.Min, draw.Over)
+
+		// 当前帧独立快照，避免后续帧污染本帧
+		frame := image.NewRGBA(canvas.Bounds())
+		draw.Draw(frame, frame.Bounds(), canvas, image.Point{}, draw.Src)
 
 		// 帧延迟（GIF 单位是 1/100 秒）
 		delay := time.Duration(g.Delay[i]) * 10 * time.Millisecond
@@ -116,7 +127,7 @@ func loadGIF(path string) (*Animator, error) {
 		}
 
 		anim.Frames[i] = Frame{
-			Image: rgba,
+			Image: frame,
 			Delay: delay,
 		}
 	}
