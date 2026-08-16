@@ -37,7 +37,6 @@ func (a *App) playSound(name string) {
 		if err != nil {
 			return
 		}
-		defer f.Close()
 
 		var s beep.StreamSeekCloser
 		var format beep.Format
@@ -49,15 +48,20 @@ func (a *App) playSound(name string) {
 		case ".wav":
 			s, format, err = wav.Decode(f)
 		default:
+			f.Close()
 			return
 		}
 
 		if err != nil {
+			f.Close()
 			return
 		}
-		defer s.Close()
 
 		resampled := beep.Resample(4, format.SampleRate, 44100, s)
-		speaker.Play(resampled)
+		// 播放完成后才关闭流/文件：speaker.Play 仅入队，音频线程会异步
+		// 从文件读取，提前 Close 会导致读取与关闭竞争而卡死。
+		speaker.Play(beep.Seq(resampled, beep.Callback(func() {
+			s.Close()
+		})))
 	}()
 }
