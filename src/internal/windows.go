@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -147,19 +148,30 @@ func (a *App) CreateWindow() {
 		println("CreateWindowEx failed, err:", getLastError())
 		return
 	}
+	println("hwnd:", hwnd)
 
-	procSetTimer.Call(hwnd, 1, 16, 0)   // 60fps：动画+移动+渲染
-	procSetTimer.Call(hwnd, 2, 2000, 0) // AI 状态转移
-	procSetTimer.Call(hwnd, 3, 5000, 0) // 遮挡检测
+	t1, _, _ := procSetTimer.Call(hwnd, 1, 16, 0)   // 60fps：动画+移动+渲染
+	t2, _, _ := procSetTimer.Call(hwnd, 2, 2000, 0) // AI 状态转移
+	t3, _, _ := procSetTimer.Call(hwnd, 3, 5000, 0) // 遮挡检测
+	println("timers:", t1, t2, t3)
 }
 
 // RunMessageLoop 消息泵。GetMessage 返回 0（WM_QUIT）时退出。
 func (a *App) RunMessageLoop() {
 	var msg MSG
+	seen := map[uint32]bool{}
 	for {
 		ret, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
 		if ret == 0 {
 			return
+		}
+		if ret == ^uintptr(0) {
+			println("GetMessage failed, err:", getLastError())
+			continue
+		}
+		if !seen[msg.Message] {
+			seen[msg.Message] = true
+			fmt.Printf("msg: 0x%x\n", msg.Message)
 		}
 		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		procDispatchMessage.Call(uintptr(unsafe.Pointer(&msg)))

@@ -8,6 +8,7 @@ import (
 
 // 系统托盘
 func OnTrayReady() {
+	println("tray ready")
 	systray.SetTitle("🐱")
 	systray.SetTooltip("桌宠")
 
