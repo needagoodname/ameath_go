@@ -290,19 +290,34 @@ func (a *App) SwitchPet(name string) error {
 	return nil
 }
 
+// renderDbg 记录各早退点是否已打印过（仅主线程访问）
+var renderDbg = struct{ guard, frame, dc, dib bool }{}
+
 // render 渲染当前帧到分层窗口（仅主线程调用）
 func (a *App) render() {
 	p := a.Pet
 	if p.Hwnd == 0 || p.CurrentAnim == nil {
+		if !renderDbg.guard {
+			renderDbg.guard = true
+			println("render skip: hwnd:", p.Hwnd, "anim:", p.CurrentAnim)
+		}
 		return
 	}
 
 	frame := p.CurrentAnim.GetFrame()
 	if frame == nil {
+		if !renderDbg.frame {
+			renderDbg.frame = true
+			println("render skip: frame nil, current:", p.CurrentAnim.Current, "len:", len(p.CurrentAnim.Frames))
+		}
 		return
 	}
 
 	screenDC, _, _ := procGetDC.Call(0)
+	if screenDC == 0 && !renderDbg.dc {
+		renderDbg.dc = true
+		println("GetDC failed, err:", getLastError())
+	}
 	defer procReleaseDC.Call(0, screenDC)
 
 	memDC, _, _ := procCreateCompatibleDC.Call(screenDC)
@@ -328,6 +343,10 @@ func (a *App) render() {
 	var bits unsafe.Pointer
 	hbm, _, _ := procCreateDIBSection.Call(screenDC, uintptr(unsafe.Pointer(&bmi)), 0, uintptr(unsafe.Pointer(&bits)), 0, 0)
 	if hbm == 0 {
+		if !renderDbg.dib {
+			renderDbg.dib = true
+			println("CreateDIBSection failed, err:", getLastError(), "screenDC:", screenDC, "memDC:", memDC)
+		}
 		return
 	}
 	defer procDeleteObject.Call(hbm)

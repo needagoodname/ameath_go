@@ -178,7 +178,13 @@ func (a *App) RunMessageLoop() {
 	}
 }
 
+var wndProcCount int
+
 func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
+	if wndProcCount < 20 {
+		wndProcCount++
+		fmt.Printf("wndproc#%d: msg=0x%x wParam=%d\n", wndProcCount, msg, wParam)
+	}
 	switch msg {
 	case WM_PAINT:
 		app.render()
