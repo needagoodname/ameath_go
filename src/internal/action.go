@@ -107,8 +107,8 @@ func (a *App) updateAI() {
 			)
 		} else if p.StateTimer > 20 && rand.Intn(5) == 0 {
 			a.switchAnim("sleep")
-		} else if p.StateTimer > 0 && p.StateTimer%5 == 0 {
-			// 每 10s 随机换一个 idle 变体
+		} else if p.StateTimer > 0 {
+			// 每 2s 随机换一个 idle 变体
 			a.switchAnim("idle")
 		}
 
