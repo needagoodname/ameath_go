@@ -232,6 +232,7 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 				if app.Pet.CurrentAnim != nil {
 					app.Pet.CurrentAnim.Update()
 				}
+				app.maybeFinishBehavior()
 				app.updateMovement()
 				// 被遮挡时仅跳过渲染（省 CPU），AI/移动照常，
 				// 避免宠物卡在遮挡区域无法自行走出。
@@ -266,9 +267,9 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		app.Cfg.WindowY = app.Pet.Y
 		app.saveConfig()
 		// 快速点击（未拖动）保持 click 状态，让反应动画可见；
-		// 拖动结束则立即回到 idle。点击态由 AI 超时后回到 idle。
+		// 拖动结束则立即回到 idle2。
 		if app.Pet.DragMoved {
-			app.switchAnim("idle")
+			app.switchToIdle2()
 		}
 		return 0
 

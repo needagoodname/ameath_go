@@ -15,6 +15,14 @@ import (
 var internalStates = map[string]bool{
 	"walk":  true,
 	"click": true,
+	"idle":  true,
+}
+
+// oneShotStates 是一次性行为：动画播放完一轮后自动切回 idle2
+var oneShotStates = map[string]bool{
+	"click": true,
+	"eat":   true,
+	"happy": true,
 }
 
 // assetsRoot 返回资源根目录（exe 同目录下的 assets，失败回退 ./assets）
@@ -70,6 +78,12 @@ func (a *App) switchAnim(state string) {
 	if anim == p.CurrentAnim {
 		return
 	}
+	a.setAnim(state, anim)
+}
+
+// setAnim 切换到指定动画（switchAnim/switchToIdle2 的公共逻辑）。
+func (a *App) setAnim(state string, anim *Animator) {
+	p := a.Pet
 	if p.CurrentAnim != nil {
 		p.CurrentAnim.Playing = false
 	}
@@ -85,6 +99,37 @@ func (a *App) switchAnim(state string) {
 	// 同状态换变体（如 idle 随机轮换）不重复播放音效
 	if a.AudioOn && changed {
 		a.playSound(state)
+	}
+}
+
+// switchToIdle2 行为结束后切到 idle2（第二变体，缺省用第一个）。
+func (a *App) switchToIdle2() {
+	p := a.Pet
+	vs := p.Anims["idle"]
+	if len(vs) == 0 {
+		return
+	}
+	anim := vs[0]
+	if len(vs) > 1 {
+		anim = vs[1]
+	}
+	if anim == p.CurrentAnim {
+		return
+	}
+	a.setAnim("idle", anim)
+}
+
+// maybeFinishBehavior 一次性行为动画播放完一轮后切回 idle2（每帧调用）。
+func (a *App) maybeFinishBehavior() {
+	p := a.Pet
+	if p.CurrentAnim == nil || !oneShotStates[p.State] {
+		return
+	}
+	if p.Dragging {
+		return
+	}
+	if p.CurrentAnim.CurrentLoop >= 1 {
+		a.switchToIdle2()
 	}
 }
 
@@ -115,24 +160,12 @@ func (a *App) updateAI() {
 	case "walk":
 		// 移动由 updateMovement（60fps tick）执行，此处仅兜底检查
 		if p.X == p.TargetX && p.Y == p.TargetY {
-			a.switchAnim("idle")
+			a.switchToIdle2()
 		}
 
 	case "sleep":
 		if p.StateTimer > 30 || rand.Intn(10) == 0 {
-			a.switchAnim("idle")
-			p.StateTimer = 0
-		}
-
-	case "click":
-		if p.StateTimer > 1 {
-			a.switchAnim("idle")
-			p.StateTimer = 0
-		}
-
-	case "eat", "happy":
-		if p.StateTimer > 5 {
-			a.switchAnim("idle")
+			a.switchToIdle2()
 			p.StateTimer = 0
 		}
 	}
@@ -148,7 +181,7 @@ func (a *App) updateMovement() {
 	dy := p.TargetY - p.Y
 	dist := math.Sqrt(float64(dx*dx + dy*dy))
 	if dist < 1 {
-		a.switchAnim("idle")
+		a.switchToIdle2()
 		return
 	}
 
@@ -163,7 +196,7 @@ func (a *App) updateMovement() {
 	procSetWindowPos.Call(p.Hwnd, 0, uintptr(p.X), uintptr(p.Y), 0, 0, 1|4)
 
 	if p.X == p.TargetX && p.Y == p.TargetY {
-		a.switchAnim("idle")
+		a.switchToIdle2()
 	}
 }
 
