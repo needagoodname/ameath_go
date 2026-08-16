@@ -104,6 +104,18 @@ func (a *App) CreateWindow() {
 	a.ScreenW = int32(screenW)
 	a.ScreenH = int32(screenH)
 
+	// 配置里保存的旧坐标可能已超出屏幕（换显示器/分辨率），拉回可见区域
+	a.Pet.X, a.Pet.Y = a.clampToScreen(a.Pet.X, a.Pet.Y)
+
+	frames := 0
+	if a.Pet.CurrentAnim != nil {
+		frames = len(a.Pet.CurrentAnim.Frames)
+	}
+	println("pet:", a.Pet.Name, "pos:", a.Pet.X, ",", a.Pet.Y,
+		"size:", a.Pet.Width, "x", a.Pet.Height,
+		"screen:", a.ScreenW, "x", a.ScreenH,
+		"anims:", len(a.Pet.Anims), "frames:", frames)
+
 	className, _ := windows.UTF16PtrFromString("PetClass")
 
 	wcex := &WndClassEx{
@@ -126,6 +138,10 @@ func (a *App) CreateWindow() {
 	)
 
 	a.Pet.Hwnd = hwnd
+	if hwnd == 0 {
+		println("CreateWindowEx failed")
+		return
+	}
 
 	procSetTimer.Call(hwnd, 1, 16, 0)   // 60fps：动画+移动+渲染
 	procSetTimer.Call(hwnd, 2, 2000, 0) // AI 状态转移

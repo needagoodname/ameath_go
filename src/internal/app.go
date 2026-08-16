@@ -17,6 +17,8 @@ type App struct {
 	ScreenW int32
 	ScreenH int32
 
+	RenderedOnce bool
+
 	cmdChan chan func()
 }
 

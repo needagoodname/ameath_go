@@ -245,6 +245,8 @@ func (a *App) LoadResources() error {
 	p.CurrentAnim = base
 	p.CurrentAnim.Playing = true
 	p.CurrentAnim.LastUpdate = time.Now()
+	println("loaded", p.Name, "anims:", len(anims), "sounds:", len(sounds),
+		"base:", p.BaseWidth, "x", p.BaseHeight, "scale:", a.Cfg.ScalePercent)
 	return nil
 }
 
@@ -356,12 +358,18 @@ func (a *App) render() {
 	dst := POINT{p.X, p.Y}
 	size := POINT{p.Width, p.Height}
 
-	procUpdateLayeredWindow.Call(
+	ret, _, _ := procUpdateLayeredWindow.Call(
 		p.Hwnd, screenDC,
 		uintptr(unsafe.Pointer(&dst)), uintptr(unsafe.Pointer(&size)),
 		memDC, uintptr(unsafe.Pointer(&src)),
 		0, uintptr(unsafe.Pointer(&blend)), ULW_ALPHA,
 	)
+	if ret == 0 {
+		println("UpdateLayeredWindow failed")
+	} else if !a.RenderedOnce {
+		a.RenderedOnce = true
+		println("first render ok at", p.X, ",", p.Y, "size:", p.Width, "x", p.Height)
+	}
 }
 
 func (a *App) resizeWindow(percent int) {
