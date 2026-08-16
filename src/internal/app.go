@@ -16,6 +16,8 @@ type App struct {
 	Pets    []string
 	ScreenW int32
 	ScreenH int32
+	ScreenX int32
+	ScreenY int32
 
 	RenderedOnce bool
 	TrayIcon     []byte
@@ -62,18 +64,18 @@ func (a *App) playHop() {
 	}()
 }
 
-// clampToScreen 将目标坐标限制在主屏范围内。
+// clampToScreen 将目标坐标限制在工作区（含任务栏避让）范围内。
 func (a *App) clampToScreen(x, y int32) (int32, int32) {
-	maxX := a.ScreenW - a.Pet.Width
-	maxY := a.ScreenH - a.Pet.Height
-	if x < 0 {
-		x = 0
+	maxX := a.ScreenX + a.ScreenW - a.Pet.Width
+	maxY := a.ScreenY + a.ScreenH - a.Pet.Height
+	if x < a.ScreenX {
+		x = a.ScreenX
 	}
 	if x > maxX {
 		x = maxX
 	}
-	if y < 0 {
-		y = 0
+	if y < a.ScreenY {
+		y = a.ScreenY
 	}
 	if y > maxY {
 		y = maxY

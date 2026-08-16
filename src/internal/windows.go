@@ -41,6 +41,12 @@ var (
 	procGetSystemMetrics    = user32.NewProc("GetSystemMetrics")
 	procSetProcessDPIAware  = user32.NewProc("SetProcessDPIAware")
 	procGetLastError        = kernel32.NewProc("GetLastError")
+	procCreatePopupMenu     = user32.NewProc("CreatePopupMenu")
+	procAppendMenu          = user32.NewProc("AppendMenuW")
+	procTrackPopupMenu      = user32.NewProc("TrackPopupMenu")
+	procDestroyMenu         = user32.NewProc("DestroyMenu")
+	procGetCursorPos        = user32.NewProc("GetCursorPos")
+	procSystemParameters    = user32.NewProc("SystemParametersInfoW")
 )
 
 // Windows API 常量
@@ -54,6 +60,7 @@ const (
 	WS_CLIPSIBLINGS     = 0x04000000
 	WM_LBUTTONDOWN      = 0x0201
 	WM_LBUTTONUP        = 0x0202
+	WM_RBUTTONUP        = 0x0205
 	WM_MOUSEMOVE        = 0x0200
 	WM_TIMER            = 0x0113
 	WM_PAINT            = 0x000F
@@ -68,7 +75,22 @@ const (
 	WM_APP_QUIT         = WM_APP + 2
 	SM_CXSCREEN         = 0
 	SM_CYSCREEN         = 1
+	MF_STRING           = 0x0000
+	MF_SEPARATOR        = 0x0800
+	MF_POPUP            = 0x0010
+	MF_GRAYED           = 0x0001
+	TPM_RETURNCMD       = 0x0100
+	TPM_NONOTIFY        = 0x0080
+	TPM_RIGHTBUTTON     = 0x0002
+	SPI_GETWORKAREA     = 0x0030
 )
+
+type RECT struct {
+	Left   int32
+	Top    int32
+	Right  int32
+	Bottom int32
+}
 
 type POINT struct{ X, Y int32 }
 type MSG struct {
@@ -102,10 +124,20 @@ type WndClassEx struct {
 func (a *App) CreateWindow() {
 	procSetProcessDPIAware.Call()
 
-	screenW, _, _ := procGetSystemMetrics.Call(SM_CXSCREEN)
-	screenH, _, _ := procGetSystemMetrics.Call(SM_CYSCREEN)
-	a.ScreenW = int32(screenW)
-	a.ScreenH = int32(screenH)
+	// 取工作区（排除任务栏），避免宠物走到任务栏后面被判遮挡而卡住
+	var work RECT
+	procSystemParameters.Call(SPI_GETWORKAREA, 0, uintptr(unsafe.Pointer(&work)), 0)
+	if work.Right-work.Left <= 0 || work.Bottom-work.Top <= 0 {
+		screenW, _, _ := procGetSystemMetrics.Call(SM_CXSCREEN)
+		screenH, _, _ := procGetSystemMetrics.Call(SM_CYSCREEN)
+		work.Left, work.Top = 0, 0
+		work.Right = int32(screenW)
+		work.Bottom = int32(screenH)
+	}
+	a.ScreenX = work.Left
+	a.ScreenY = work.Top
+	a.ScreenW = work.Right - work.Left
+	a.ScreenH = work.Bottom - work.Top
 
 	// 配置里保存的旧坐标可能已超出屏幕（换显示器/分辨率），拉回可见区域
 	a.Pet.X, a.Pet.Y = a.clampToScreen(a.Pet.X, a.Pet.Y)
@@ -116,7 +148,7 @@ func (a *App) CreateWindow() {
 	}
 	println("pet:", a.Pet.Name, "pos:", a.Pet.X, ",", a.Pet.Y,
 		"size:", a.Pet.Width, "x", a.Pet.Height,
-		"screen:", a.ScreenW, "x", a.ScreenH,
+		"workarea:", a.ScreenX, ",", a.ScreenY, a.ScreenW, "x", a.ScreenH,
 		"anims:", len(a.Pet.Anims), "frames:", frames)
 
 	className, _ := windows.UTF16PtrFromString("PetClass")
@@ -196,15 +228,19 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 
 	case WM_TIMER:
 		if wParam == 1 {
-			if !app.Paused && !app.Away {
+			if !app.Paused {
 				if app.Pet.CurrentAnim != nil {
 					app.Pet.CurrentAnim.Update()
 				}
 				app.updateMovement()
-				app.render()
+				// 被遮挡时仅跳过渲染（省 CPU），AI/移动照常，
+				// 避免宠物卡在遮挡区域无法自行走出。
+				if !app.Away {
+					app.render()
+				}
 			}
 		} else if wParam == 2 {
-			if !app.Paused && !app.Away {
+			if !app.Paused {
 				app.updateAI()
 			}
 		} else if wParam == 3 {
@@ -247,6 +283,10 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		}
 		return 0
 
+	case WM_RBUTTONUP:
+		app.showContextMenu()
+		return 0
+
 	// 托盘投递的命令在主线程执行
 	case WM_APP_EXEC_CMD:
 		for {
@@ -280,6 +320,121 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 func getLastError() uint32 {
 	e, _, _ := procGetLastError.Call()
 	return uint32(e)
+}
+
+func appendMenuString(menu, flags, id uintptr, text string) {
+	var p *uint16
+	if text != "" {
+		p, _ = windows.UTF16PtrFromString(text)
+	}
+	procAppendMenu.Call(menu, flags, id, uintptr(unsafe.Pointer(p)))
+}
+
+// showContextMenu 右键桌宠弹出菜单（主线程调用，与托盘菜单操作一致）。
+func (a *App) showContextMenu() {
+	menu, _, _ := procCreatePopupMenu.Call()
+	if menu == 0 {
+		return
+	}
+	defer procDestroyMenu.Call(menu)
+
+	// 行为状态（动态生成）
+	states := a.MenuStates()
+	for i, s := range states {
+		appendMenuString(menu, MF_STRING, uintptr(400+i), s)
+	}
+	if len(states) > 0 {
+		appendMenuString(menu, MF_SEPARATOR, 0, "")
+	}
+
+	appendMenuString(menu, MF_STRING, 1, "显示/隐藏")
+	appendMenuString(menu, MF_STRING, 2, "静音")
+	appendMenuString(menu, MF_STRING, 3, "暂停")
+	appendMenuString(menu, MF_SEPARATOR, 0, "")
+
+	petMenu, _, _ := procCreatePopupMenu.Call()
+	for i, name := range a.Pets {
+		title := name
+		if name == a.Pet.Name {
+			title = "✓ " + name
+		}
+		appendMenuString(petMenu, MF_STRING, uintptr(100+i), title)
+	}
+	appendMenuString(menu, MF_POPUP, petMenu, "切换宠物")
+
+	scalePresets := []int{50, 75, 100, 125, 150, 200}
+	scaleMenu, _, _ := procCreatePopupMenu.Call()
+	for i, pct := range scalePresets {
+		title := fmt.Sprintf("%d%%", pct)
+		if pct == a.Cfg.ScalePercent {
+			title = "✓ " + title
+		}
+		appendMenuString(scaleMenu, MF_STRING, uintptr(200+i), title)
+	}
+	appendMenuString(menu, MF_POPUP, scaleMenu, "缩放")
+
+	appendMenuString(menu, MF_SEPARATOR, 0, "")
+	appendMenuString(menu, MF_STRING, 6, "开机启动")
+	appendMenuString(menu, MF_SEPARATOR, 0, "")
+	appendMenuString(menu, MF_STRING, 7, "退出")
+
+	var pt POINT
+	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+
+	cmd, _, _ := procTrackPopupMenu.Call(
+		menu, TPM_RETURNCMD|TPM_NONOTIFY|TPM_RIGHTBUTTON,
+		uintptr(pt.X), uintptr(pt.Y), 0, a.Pet.Hwnd, 0,
+	)
+
+	switch {
+	case cmd == 1:
+		gwl := int32(GWL_STYLE)
+		style, _, _ := procGetWindowLong.Call(a.Pet.Hwnd, uintptr(gwl))
+		if style&WS_VISIBLE != 0 {
+			procShowWindow.Call(a.Pet.Hwnd, 0)
+		} else {
+			procShowWindow.Call(a.Pet.Hwnd, SW_SHOWNOACTIVATE)
+		}
+	case cmd == 2:
+		a.AudioOn = !a.AudioOn
+		a.Cfg.AudioOn = a.AudioOn
+		a.saveConfig()
+	case cmd == 3:
+		a.Paused = !a.Paused
+		if !a.Paused {
+			a.Away = false
+		}
+	case cmd == 6:
+		a.Cfg.AutoStart = !a.Cfg.AutoStart
+		if a.Cfg.AutoStart {
+			EnableAutoStart()
+		} else {
+			DisableAutoStart()
+		}
+		a.saveConfig()
+	case cmd == 7:
+		procPostMessage.Call(a.Pet.Hwnd, WM_APP_QUIT, 0, 0)
+	case cmd >= 100 && cmd < 200:
+		if i := int(cmd - 100); i < len(a.Pets) {
+			if err := a.SwitchPet(a.Pets[i]); err != nil {
+				println("switch pet failed:", err.Error())
+			}
+		}
+	case cmd >= 200 && cmd < 300:
+		if i := int(cmd - 200); i < len(scalePresets) {
+			if pct := scalePresets[i]; pct != a.Cfg.ScalePercent {
+				a.resizeWindow(pct)
+			}
+		}
+	case cmd >= 400:
+		if i := int(cmd - 400); i < len(states) {
+			s := states[i]
+			a.switchAnim(s)
+			if s == "happy" {
+				a.playHop()
+			}
+		}
+	}
 }
 
 func getModule() uintptr {
