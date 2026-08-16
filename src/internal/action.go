@@ -323,9 +323,19 @@ func (a *App) render() {
 	memDC, _, _ := procCreateCompatibleDC.Call(screenDC)
 	defer procDeleteDC.Call(memDC)
 
-	// DIB 头
+	// DIB 头（布局必须与 Win32 BITMAPINFOHEADER 完全一致，共 40 字节）
 	type BITMAPINFOHEADER struct {
-		Size, Width, Height, Planes, BitCount, Compression, SizeImage, XPels, YPels, ClrUsed, ClrImportant uint32
+		Size          uint32
+		Width         int32
+		Height        int32
+		Planes        uint16
+		BitCount      uint16
+		Compression   uint32
+		SizeImage     uint32
+		XPelsPerMeter int32
+		YPelsPerMeter int32
+		ClrUsed       uint32
+		ClrImportant  uint32
 	}
 
 	bmi := struct {
@@ -333,8 +343,8 @@ func (a *App) render() {
 	}{
 		Header: BITMAPINFOHEADER{
 			Size:     uint32(unsafe.Sizeof(BITMAPINFOHEADER{})),
-			Width:    uint32(p.Width),
-			Height:   uint32(-p.Height), // 自顶向下
+			Width:    int32(p.Width),
+			Height:   -p.Height, // 自顶向下
 			Planes:   1,
 			BitCount: 32,
 		},
