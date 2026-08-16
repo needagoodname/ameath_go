@@ -39,6 +39,7 @@ var (
 	procDestroyWindow       = user32.NewProc("DestroyWindow")
 	procGetSystemMetrics    = user32.NewProc("GetSystemMetrics")
 	procSetProcessDPIAware  = user32.NewProc("SetProcessDPIAware")
+	procGetLastError        = kernel32.NewProc("GetLastError")
 )
 
 // Windows API 常量
@@ -92,6 +93,7 @@ type WndClassEx struct {
 	HbrBackground windows.Handle
 	LpszMenuName  *uint16
 	LpszClassName *uint16
+	HIconSm       windows.Handle
 }
 
 // CreateWindow 注册窗口类、创建分层窗口、启动定时器。
@@ -126,7 +128,10 @@ func (a *App) CreateWindow() {
 		LpszClassName: className,
 	}
 
-	procRegisterClassEx.Call(uintptr(unsafe.Pointer(wcex)))
+	r, _, _ := procRegisterClassEx.Call(uintptr(unsafe.Pointer(wcex)))
+	if r == 0 {
+		println("RegisterClassEx failed, err:", getLastError())
+	}
 
 	hwnd, _, _ := procCreateWindowEx.Call(
 		WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
@@ -139,7 +144,7 @@ func (a *App) CreateWindow() {
 
 	a.Pet.Hwnd = hwnd
 	if hwnd == 0 {
-		println("CreateWindowEx failed")
+		println("CreateWindowEx failed, err:", getLastError())
 		return
 	}
 
@@ -242,6 +247,11 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 
 	ret, _, _ := procDefWindowProc.Call(hwnd, uintptr(msg), wParam, lParam)
 	return ret
+}
+
+func getLastError() uint32 {
+	e, _, _ := procGetLastError.Call()
+	return uint32(e)
 }
 
 func getModule() uintptr {
