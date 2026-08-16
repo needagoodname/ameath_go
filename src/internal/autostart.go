@@ -82,8 +82,8 @@ func IsAutoStartEnabled() bool {
 }
 
 // SyncAutoStart 根据配置同步注册表状态
-func SyncAutoStart() {
-	if Cfg.AutoStart {
+func (a *App) SyncAutoStart() {
+	if a.Cfg.AutoStart {
 		EnableAutoStart()
 	} else {
 		DisableAutoStart()

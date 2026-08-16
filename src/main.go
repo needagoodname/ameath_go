@@ -16,37 +16,45 @@ func init() {
 }
 
 func main() {
+	app := internal.NewApp()
+
 	// 加载配置
-	internal.LoadConfig()
+	app.LoadConfig()
 
 	// 发现可用宠物
-	internal.DiscoverPets()
+	app.DiscoverPets()
 
 	// 确定当前宠物
-	petName := internal.Cfg.CurrentPet
-	avail := internal.AvailablePets()
+	petName := app.Cfg.CurrentPet
+	avail := app.Pets
 	if petName == "" && len(avail) > 0 {
 		petName = avail[0]
 	}
 	if petName == "" {
 		petName = "default"
 	}
-
-	// 创建宠物实例
-	internal.NewPet(petName)
+	app.NewPet(petName)
 
 	// 初始化音频
-	if err := internal.InitAudio(); err != nil {
+	if err := app.InitAudio(); err != nil {
 		println("Audio init failed:", err.Error())
 	}
 
 	// 加载宠物资源
-	internal.LoadResources(petName)
+	if err := app.LoadResources(); err != nil {
+		println("Load resources failed:", err.Error())
+	}
 
 	// 同步开机自启状态
-	internal.SyncAutoStart()
+	app.SyncAutoStart()
+
+	// 先建窗口再启托盘，保证 postCmd 投递时 hwnd 已存在
+	app.CreateWindow()
 
 	// 启动系统托盘和窗口消息循环
 	go systray.Run(internal.OnTrayReady, internal.OnTrayExit)
-	internal.RunMessageLoop()
+	app.RunMessageLoop()
+
+	// 消息循环退出后清理托盘
+	systray.Quit()
 }

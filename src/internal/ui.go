@@ -2,7 +2,6 @@ package internal
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/getlantern/systray"
 )
@@ -17,7 +16,7 @@ func OnTrayReady() {
 
 	// 行为菜单（动态生成）
 	stateMenuItems := make(map[string]*systray.MenuItem)
-	for _, state := range MenuStates() {
+	for _, state := range app.MenuStates() {
 		item := systray.AddMenuItem(state, "")
 		stateMenuItems[state] = item
 	}
@@ -30,14 +29,14 @@ func OnTrayReady() {
 
 	// 宠物切换子菜单
 	mSwitchPet := systray.AddMenuItem("切换宠物", "")
-	pets := AvailablePets()
+	pets := app.Pets
 	if len(pets) <= 1 {
 		mSwitchPet.Disable()
 	}
 	petMenuItems := make(map[string]*systray.MenuItem)
 	for _, name := range pets {
 		title := name
-		if pet != nil && name == pet.Name {
+		if app.Pet != nil && name == app.Pet.Name {
 			title = "✓ " + name
 		}
 		item := mSwitchPet.AddSubMenuItem(title, "")
@@ -50,7 +49,7 @@ func OnTrayReady() {
 	scaleMenuItems := make(map[int]*systray.MenuItem)
 	for _, pct := range scalePresets {
 		title := fmt.Sprintf("%d%%", pct)
-		if Cfg.ScalePercent == pct {
+		if app.Cfg.ScalePercent == pct {
 			title = "✓ " + title
 		}
 		item := mScale.AddSubMenuItem(title, "")
@@ -60,7 +59,7 @@ func OnTrayReady() {
 	systray.AddSeparator()
 
 	mAutoStart := systray.AddMenuItem("开机启动", "")
-	if Cfg.AutoStart {
+	if app.Cfg.AutoStart {
 		mAutoStart.SetTitle("开机启动 ✓")
 	}
 	systray.AddSeparator()
@@ -71,43 +70,49 @@ func OnTrayReady() {
 		for {
 			select {
 			case <-mToggle.ClickedCh:
-				style, _, _ := procGetWindowLong.Call(pet.Hwnd, GWL_STYLE)
-				if style&WS_VISIBLE != 0 {
-					procShowWindow.Call(pet.Hwnd, 0)
-				} else {
-					procShowWindow.Call(pet.Hwnd, SW_SHOWNOACTIVATE)
-				}
+				app.postCmd(func() {
+					style, _, _ := procGetWindowLong.Call(app.Pet.Hwnd, GWL_STYLE)
+					if style&WS_VISIBLE != 0 {
+						procShowWindow.Call(app.Pet.Hwnd, 0)
+					} else {
+						procShowWindow.Call(app.Pet.Hwnd, SW_SHOWNOACTIVATE)
+					}
+				})
 			case <-mMute.ClickedCh:
-				audioOn = !audioOn
-				Cfg.AudioOn = audioOn
-				saveConfig()
-				if audioOn {
-					mMute.SetTitle("静音")
-				} else {
-					mMute.SetTitle("取消静音")
-				}
+				app.postCmd(func() {
+					app.AudioOn = !app.AudioOn
+					app.Cfg.AudioOn = app.AudioOn
+					app.saveConfig()
+					if app.AudioOn {
+						mMute.SetTitle("静音")
+					} else {
+						mMute.SetTitle("取消静音")
+					}
+				})
 			case <-mPause.ClickedCh:
-				paused = !paused
-				if paused {
-					mPause.SetTitle("继续")
-				} else {
-					mPause.SetTitle("暂停")
-					away = false
-				}
+				app.postCmd(func() {
+					app.Paused = !app.Paused
+					if app.Paused {
+						mPause.SetTitle("继续")
+					} else {
+						mPause.SetTitle("暂停")
+						app.Away = false
+					}
+				})
 			case <-mAutoStart.ClickedCh:
-				Cfg.AutoStart = !Cfg.AutoStart
-				if Cfg.AutoStart {
-					mAutoStart.SetTitle("开机启动 ✓")
-					EnableAutoStart()
-				} else {
-					mAutoStart.SetTitle("开机启动")
-					DisableAutoStart()
-				}
-				saveConfig()
+				app.postCmd(func() {
+					app.Cfg.AutoStart = !app.Cfg.AutoStart
+					if app.Cfg.AutoStart {
+						mAutoStart.SetTitle("开机启动 ✓")
+						EnableAutoStart()
+					} else {
+						mAutoStart.SetTitle("开机启动")
+						DisableAutoStart()
+					}
+					app.saveConfig()
+				})
 			case <-mQuit.ClickedCh:
-				systray.Quit()
-				close(quitChan)
-				procPostQuitMessage.Call(0)
+				procPostMessage.Call(app.Pet.Hwnd, WM_APP_QUIT, 0, 0)
 			}
 		}
 	}()
@@ -116,17 +121,12 @@ func OnTrayReady() {
 	for state, item := range stateMenuItems {
 		go func(s string, mi *systray.MenuItem) {
 			for range mi.ClickedCh {
-				switchAnim(s)
-				if s == "happy" {
-					for i := 0; i < 3; i++ {
-						pet.Y -= 20
-						procSetWindowPos.Call(pet.Hwnd, 0, uintptr(pet.X), uintptr(pet.Y), 0, 0, 1|4)
-						time.Sleep(100 * time.Millisecond)
-						pet.Y += 20
-						procSetWindowPos.Call(pet.Hwnd, 0, uintptr(pet.X), uintptr(pet.Y), 0, 0, 1|4)
-						time.Sleep(100 * time.Millisecond)
+				app.postCmd(func() {
+					app.switchAnim(s)
+					if s == "happy" {
+						app.playHop()
 					}
-				}
+				})
 			}
 		}(state, item)
 	}
@@ -135,8 +135,14 @@ func OnTrayReady() {
 	for name, item := range petMenuItems {
 		go func(n string, mi *systray.MenuItem) {
 			for range mi.ClickedCh {
-				if n != pet.Name {
-					SwitchPet(n)
+				app.postCmd(func() {
+					if n == app.Pet.Name {
+						return
+					}
+					if err := app.SwitchPet(n); err != nil {
+						println("switch pet failed:", err.Error())
+						return
+					}
 					for pn, pmi := range petMenuItems {
 						if pn == n {
 							pmi.SetTitle("✓ " + pn)
@@ -146,13 +152,13 @@ func OnTrayReady() {
 					}
 					// 更新行为菜单项可见性
 					for s, smi := range stateMenuItems {
-						if HasMenuState(s) {
+						if app.HasMenuState(s) {
 							smi.Show()
 						} else {
 							smi.Hide()
 						}
 					}
-				}
+				})
 			}
 		}(name, item)
 	}
@@ -161,8 +167,11 @@ func OnTrayReady() {
 	for pct, item := range scaleMenuItems {
 		go func(percent int, mi *systray.MenuItem) {
 			for range mi.ClickedCh {
-				if percent != Cfg.ScalePercent {
-					resizeWindow(percent)
+				app.postCmd(func() {
+					if percent == app.Cfg.ScalePercent {
+						return
+					}
+					app.resizeWindow(percent)
 					for sp, smi := range scaleMenuItems {
 						if sp == percent {
 							smi.SetTitle(fmt.Sprintf("✓ %d%%", sp))
@@ -170,7 +179,7 @@ func OnTrayReady() {
 							smi.SetTitle(fmt.Sprintf("%d%%", sp))
 						}
 					}
-				}
+				})
 			}
 		}(pct, item)
 	}

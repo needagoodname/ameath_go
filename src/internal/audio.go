@@ -11,22 +11,23 @@ import (
 	"github.com/gopxl/beep/v2/wav"
 )
 
-// 初始化音频
-func InitAudio() error {
+// InitAudio 初始化音频（失败则关闭声音）
+func (a *App) InitAudio() error {
 	if err := speaker.Init(44100, 44100/10); err != nil {
-		audioOn = false
+		a.AudioOn = false
 		return err
 	}
 	return nil
 }
 
-// 播放音频
-func playSound(name string) {
-	if !audioOn || paused {
+// playSound 播放状态对应音效（仅主线程调用；文件列表在此取值，
+// 解码与播放 goroutine 内只使用局部副本）。
+func (a *App) playSound(name string) {
+	if !a.AudioOn || a.Paused {
 		return
 	}
 
-	files := pet.Sounds[name]
+	files := a.Pet.Sounds[name]
 	if len(files) == 0 {
 		return
 	}
@@ -37,10 +38,10 @@ func playSound(name string) {
 			return
 		}
 		defer f.Close()
-		
+
 		var s beep.StreamSeekCloser
 		var format beep.Format
-		
+
 		ext := filepath.Ext(file)
 		switch ext {
 		case ".mp3":
@@ -50,12 +51,12 @@ func playSound(name string) {
 		default:
 			return
 		}
-		
+
 		if err != nil {
 			return
 		}
 		defer s.Close()
-		
+
 		resampled := beep.Resample(4, format.SampleRate, 44100, s)
 		speaker.Play(resampled)
 	}()

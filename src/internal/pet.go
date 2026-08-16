@@ -21,20 +21,20 @@ type Pet struct {
 	StateTimer  int
 }
 
-func NewPet(name string) {
-	pet = &Pet{
+func (a *App) NewPet(name string) {
+	a.Pet = &Pet{
 		Name:    name,
 		State:   "idle",
-		X:       Cfg.WindowX,
-		Y:       Cfg.WindowY,
+		X:       a.Cfg.WindowX,
+		Y:       a.Cfg.WindowY,
 		Width:   128,
 		Height:  128,
 		Anims:   make(map[string]*Animator),
 		Sounds:  make(map[string][]string),
 	}
-	if pet.X == 0 && pet.Y == 0 {
-		pet.X = 100
-		pet.Y = 100
+	if a.Pet.X == 0 && a.Pet.Y == 0 {
+		a.Pet.X = 100
+		a.Pet.Y = 100
 	}
 }
 

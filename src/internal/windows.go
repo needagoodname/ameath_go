@@ -10,7 +10,7 @@ var (
 	kernel32 = windows.NewLazySystemDLL("kernel32.dll")
 	user32   = windows.NewLazySystemDLL("user32.dll")
 	gdi32    = windows.NewLazySystemDLL("gdi32.dll")
-	
+
 	procCreateWindowEx      = user32.NewProc("CreateWindowExW")
 	procRegisterClassEx     = user32.NewProc("RegisterClassExW")
 	procDefWindowProc       = user32.NewProc("DefWindowProcW")
@@ -35,6 +35,9 @@ var (
 	procReleaseCapture      = user32.NewProc("ReleaseCapture")
 	procLoadCursor          = user32.NewProc("LoadCursorW")
 	procWindowFromPoint     = user32.NewProc("WindowFromPoint")
+	procDestroyWindow       = user32.NewProc("DestroyWindow")
+	procGetSystemMetrics    = user32.NewProc("GetSystemMetrics")
+	procSetProcessDPIAware  = user32.NewProc("SetProcessDPIAware")
 )
 
 // Windows API 常量
@@ -57,6 +60,11 @@ const (
 	AC_SRC_ALPHA        = 0x01
 	SW_SHOWNOACTIVATE   = 4
 	GWL_STYLE           = -16
+	WM_APP              = 0x8000
+	WM_APP_EXEC_CMD     = WM_APP + 1
+	WM_APP_QUIT         = WM_APP + 2
+	SM_CXSCREEN         = 0
+	SM_CYSCREEN         = 1
 )
 
 type POINT struct{ X, Y int32 }
@@ -72,10 +80,18 @@ type BLENDFUNCTION struct {
 	BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat byte
 }
 
-// 创建窗口并运行消息循环
-func RunMessageLoop() {
+// CreateWindow 注册窗口类、创建分层窗口、启动定时器。
+// 必须在托盘启动前调用，保证 postCmd 投递时 hwnd 已存在。
+func (a *App) CreateWindow() {
+	procSetProcessDPIAware.Call()
+
+	screenW, _, _ := procGetSystemMetrics.Call(SM_CXSCREEN)
+	screenH, _, _ := procGetSystemMetrics.Call(SM_CYSCREEN)
+	a.ScreenW = int32(screenW)
+	a.ScreenH = int32(screenH)
+
 	className, _ := windows.UTF16PtrFromString("PetClass")
-	
+
 	wcex := &windows.WndClassEx{
 		CbSize:        uint32(unsafe.Sizeof(windows.WndClassEx{})),
 		LpfnWndProc:   windows.NewCallback(wndProc),
@@ -83,100 +99,117 @@ func RunMessageLoop() {
 		HCursor:       windows.Handle(loadCursor(32512)),
 		LpszClassName: className,
 	}
-	
+
 	procRegisterClassEx.Call(uintptr(unsafe.Pointer(wcex)))
-	
+
 	hwnd, _, _ := procCreateWindowEx.Call(
 		WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
 		uintptr(unsafe.Pointer(className)),
 		0, WS_POPUP|WS_VISIBLE,
-		uintptr(pet.X), uintptr(pet.Y),
-		uintptr(pet.Width), uintptr(pet.Height),
+		uintptr(a.Pet.X), uintptr(a.Pet.Y),
+		uintptr(a.Pet.Width), uintptr(a.Pet.Height),
 		0, 0, uintptr(wcex.HInstance), 0,
 	)
-	
-	pet.Hwnd = hwnd
-	
-	procSetTimer.Call(hwnd, 1, 16, 0)   // 60fps
-	procSetTimer.Call(hwnd, 2, 2000, 0) // AI
+
+	a.Pet.Hwnd = hwnd
+
+	procSetTimer.Call(hwnd, 1, 16, 0)   // 60fps：动画+移动+渲染
+	procSetTimer.Call(hwnd, 2, 2000, 0) // AI 状态转移
 	procSetTimer.Call(hwnd, 3, 5000, 0) // 遮挡检测
-	
+}
+
+// RunMessageLoop 消息泵。GetMessage 返回 0（WM_QUIT）时退出。
+func (a *App) RunMessageLoop() {
 	var msg MSG
 	for {
-		select {
-		case <-quitChan:
+		ret, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		if ret == 0 {
 			return
-		default:
-			ret, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
-			if ret == 0 {
-				return
-			}
-			procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
-			procDispatchMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		}
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		procDispatchMessage.Call(uintptr(unsafe.Pointer(&msg)))
 	}
 }
 
 func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	switch msg {
 	case WM_PAINT:
-		render()
+		app.render()
 		return 0
-		
+
 	case WM_TIMER:
 		if wParam == 1 {
-			if !paused && !away {
-				if pet.CurrentAnim != nil {
-					pet.CurrentAnim.Update()
+			if !app.Paused && !app.Away {
+				if app.Pet.CurrentAnim != nil {
+					app.Pet.CurrentAnim.Update()
 				}
-				render()
+				app.updateMovement()
+				app.render()
 			}
 		} else if wParam == 2 {
-			if !paused && !away {
-				updateAI()
+			if !app.Paused && !app.Away {
+				app.updateAI()
 			}
 		} else if wParam == 3 {
-			if !paused && !pet.Dragging {
-				away = checkOcclusion()
+			if !app.Paused && !app.Pet.Dragging {
+				app.Away = app.checkOcclusion()
 			}
 		}
 		return 0
-		
+
 	case WM_LBUTTONDOWN:
-		pet.Dragging = true
-		pet.DragX = int32(lParam) & 0xFFFF
-		pet.DragY = int32(lParam) >> 16
+		app.Pet.Dragging = true
+		app.Pet.DragX = int32(int16(lParam & 0xFFFF))
+		app.Pet.DragY = int32(int16(lParam >> 16))
 		procSetCapture.Call(hwnd)
-		switchAnim("click")
+		app.switchAnim("click")
 		return 0
-		
+
 	case WM_LBUTTONUP:
-		pet.Dragging = false
+		app.Pet.Dragging = false
 		procReleaseCapture.Call(hwnd)
-		Cfg.WindowX = pet.X
-		Cfg.WindowY = pet.Y
-		saveConfig()
-		switchAnim("idle")
+		app.Cfg.WindowX = app.Pet.X
+		app.Cfg.WindowY = app.Pet.Y
+		app.saveConfig()
+		app.switchAnim("idle")
 		return 0
-		
+
 	case WM_MOUSEMOVE:
-		if pet.Dragging {
-			x := int32(lParam) & 0xFFFF
-			y := int32(lParam) >> 16
-			pet.X += x - pet.DragX
-			pet.Y += y - pet.DragY
-			procSetWindowPos.Call(hwnd, 0, uintptr(pet.X), uintptr(pet.Y), 0, 0, 1|4)
+		if app.Pet.Dragging {
+			x := int32(int16(lParam & 0xFFFF))
+			y := int32(int16(lParam >> 16))
+			app.Pet.X += x - app.Pet.DragX
+			app.Pet.Y += y - app.Pet.DragY
+			procSetWindowPos.Call(hwnd, 0, uintptr(app.Pet.X), uintptr(app.Pet.Y), 0, 0, 1|4)
 		}
 		return 0
-		
+
+	// 托盘投递的命令在主线程执行
+	case WM_APP_EXEC_CMD:
+		for {
+			select {
+			case f := <-app.cmdChan:
+				f()
+			default:
+				return 0
+			}
+		}
+
+	case WM_APP_QUIT:
+		procDestroyWindow.Call(hwnd) // 同步触发 WM_DESTROY
+		return 0
+
 	case WM_DESTROY:
 		procKillTimer.Call(hwnd, 1)
 		procKillTimer.Call(hwnd, 2)
 		procKillTimer.Call(hwnd, 3)
+		app.Cfg.WindowX = app.Pet.X
+		app.Cfg.WindowY = app.Pet.Y
+		app.saveConfig()
 		procPostQuitMessage.Call(0)
 		return 0
 	}
-	
+
 	ret, _, _ := procDefWindowProc.Call(hwnd, uintptr(msg), wParam, lParam)
 	return ret
 }
@@ -191,20 +224,38 @@ func loadCursor(id uintptr) uintptr {
 	return c
 }
 
-func checkOcclusion() bool {
-	if pet.Hwnd == 0 {
+// checkOcclusion 采样精灵不透明区域判断是否被其他窗口遮挡。
+// 仅不透明像素（alpha ≥ 32）参与 WindowFromPoint 命中判断，
+// 避免透明像素被误判为被遮挡。
+func (a *App) checkOcclusion() bool {
+	p := a.Pet
+	if p.Hwnd == 0 || p.CurrentAnim == nil {
 		return false
 	}
+	frame := p.CurrentAnim.GetFrame()
+	if frame == nil {
+		return false
+	}
+
 	pts := []POINT{
-		{pet.X + pet.Width/2, pet.Y + pet.Height/2},
-		{pet.X + 2, pet.Y + 2},
-		{pet.X + pet.Width - 2, pet.Y + 2},
-		{pet.X + 2, pet.Y + pet.Height - 2},
-		{pet.X + pet.Width - 2, pet.Y + pet.Height - 2},
+		{p.X + p.Width/2, p.Y + p.Height/2},
+		{p.X + p.Width/4, p.Y + p.Height/2},
+		{p.X + 3*p.Width/4, p.Y + p.Height/2},
+		{p.X + p.Width/2, p.Y + p.Height/4},
+		{p.X + p.Width/2, p.Y + 3*p.Height/4},
 	}
 	for _, pt := range pts {
+		// 屏幕坐标换算为精灵坐标检查透明度
+		sx := int(pt.X-p.X) * int(p.BaseWidth) / int(p.Width)
+		sy := int(pt.Y-p.Y) * int(p.BaseHeight) / int(p.Height)
+		if sx < 0 || sy < 0 || sx >= int(p.BaseWidth) || sy >= int(p.BaseHeight) {
+			continue
+		}
+		if frame.RGBAAt(sx, sy).A < 32 {
+			continue
+		}
 		h, _, _ := procWindowFromPoint.Call(uintptr(uint32(pt.X)) | uintptr(uint32(pt.Y))<<32)
-		if h == pet.Hwnd {
+		if h == p.Hwnd {
 			return false
 		}
 	}
