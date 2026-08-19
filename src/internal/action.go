@@ -355,8 +355,17 @@ func (a *App) SwitchPet(name string) error {
 	return nil
 }
 
-// renderDbg 记录各早退点是否已打印过（仅主线程访问）
+// renderDbg 记录渲染早退点是否已打印过（仅主线程访问）
 var renderDbg = struct{ guard, frame, dc, dib bool }{}
+
+// 渲染缓存（仅主线程访问）：复用 memDC/DIB，避免每帧分配 GDI 对象
+// 泄漏导致对象耗尽后 CreateDIBSection 失败而画面卡死。
+var (
+	renderMemDC      uintptr
+	renderBmp        uintptr
+	renderBits       unsafe.Pointer
+	renderW, renderH int32
+)
 
 // render 渲染当前帧到分层窗口（仅主线程调用）
 func (a *App) render() {
@@ -379,57 +388,25 @@ func (a *App) render() {
 	}
 
 	screenDC, _, _ := procGetDC.Call(0)
-	if screenDC == 0 && !renderDbg.dc {
-		renderDbg.dc = true
-		println("GetDC failed, err:", getLastError())
-	}
-	defer procReleaseDC.Call(0, screenDC)
-
-	memDC, _, _ := procCreateCompatibleDC.Call(screenDC)
-	defer procDeleteDC.Call(memDC)
-
-	// DIB 头（布局必须与 Win32 BITMAPINFOHEADER 完全一致，共 40 字节）
-	type BITMAPINFOHEADER struct {
-		Size          uint32
-		Width         int32
-		Height        int32
-		Planes        uint16
-		BitCount      uint16
-		Compression   uint32
-		SizeImage     uint32
-		XPelsPerMeter int32
-		YPelsPerMeter int32
-		ClrUsed       uint32
-		ClrImportant  uint32
-	}
-
-	bmi := struct {
-		Header BITMAPINFOHEADER
-	}{
-		Header: BITMAPINFOHEADER{
-			Size:     uint32(unsafe.Sizeof(BITMAPINFOHEADER{})),
-			Width:    int32(p.Width),
-			Height:   -p.Height, // 自顶向下
-			Planes:   1,
-			BitCount: 32,
-		},
-	}
-
-	var bits unsafe.Pointer
-	hbm, _, _ := procCreateDIBSection.Call(screenDC, uintptr(unsafe.Pointer(&bmi)), 0, uintptr(unsafe.Pointer(&bits)), 0, 0)
-	if hbm == 0 {
-		if !renderDbg.dib {
-			renderDbg.dib = true
-			println("CreateDIBSection failed, err:", getLastError(), "screenDC:", screenDC, "memDC:", memDC)
+	if screenDC == 0 {
+		if !renderDbg.dc {
+			renderDbg.dc = true
+			println("GetDC failed, err:", getLastError())
 		}
 		return
 	}
-	defer procDeleteObject.Call(hbm)
+	defer procReleaseDC.Call(0, screenDC)
 
-	procSelectObject.Call(memDC, hbm)
+	// 尺寸变化（缩放/切换宠物）时重建 DIB 与 DC
+	if renderMemDC == 0 || renderW != p.Width || renderH != p.Height {
+		a.rebuildRenderTarget(screenDC, p.Width, p.Height)
+		if renderMemDC == 0 {
+			return
+		}
+	}
 
 	// 复制像素 BGRA（最近邻缩放）
-	pixels := (*[1 << 20]byte)(bits)
+	pixels := unsafe.Slice((*byte)(renderBits), int(p.Width)*int(p.Height)*4)
 	srcW := int(p.BaseWidth)
 	srcH := int(p.BaseHeight)
 	dstW := int(p.Width)
@@ -455,7 +432,7 @@ func (a *App) render() {
 	ret, _, _ := procUpdateLayeredWindow.Call(
 		p.Hwnd, screenDC,
 		uintptr(unsafe.Pointer(&dst)), uintptr(unsafe.Pointer(&size)),
-		memDC, uintptr(unsafe.Pointer(&src)),
+		renderMemDC, uintptr(unsafe.Pointer(&src)),
 		0, uintptr(unsafe.Pointer(&blend)), ULW_ALPHA,
 	)
 	if ret == 0 {
@@ -465,6 +442,70 @@ func (a *App) render() {
 		procShowWindow.Call(p.Hwnd, SW_SHOWNOACTIVATE)
 		println("first render ok at", p.X, ",", p.Y, "size:", p.Width, "x", p.Height)
 	}
+}
+
+// rebuildRenderTarget 按窗口尺寸重建 memDC 与 DIB（仅主线程调用）。
+func (a *App) rebuildRenderTarget(screenDC uintptr, w, h int32) {
+	if renderMemDC != 0 {
+		procDeleteDC.Call(renderMemDC)
+		renderMemDC = 0
+	}
+	if renderBmp != 0 {
+		procDeleteObject.Call(renderBmp)
+		renderBmp = 0
+	}
+	renderBits = nil
+	renderW, renderH = 0, 0
+
+	memDC, _, _ := procCreateCompatibleDC.Call(screenDC)
+	if memDC == 0 {
+		return
+	}
+
+	// DIB 头（布局必须与 Win32 BITMAPINFOHEADER 完全一致，共 40 字节）
+	type BITMAPINFOHEADER struct {
+		Size          uint32
+		Width         int32
+		Height        int32
+		Planes        uint16
+		BitCount      uint16
+		Compression   uint32
+		SizeImage     uint32
+		XPelsPerMeter int32
+		YPelsPerMeter int32
+		ClrUsed       uint32
+		ClrImportant  uint32
+	}
+
+	bmi := struct {
+		Header BITMAPINFOHEADER
+	}{
+		Header: BITMAPINFOHEADER{
+			Size:     uint32(unsafe.Sizeof(BITMAPINFOHEADER{})),
+			Width:    int32(w),
+			Height:   -h, // 自顶向下
+			Planes:   1,
+			BitCount: 32,
+		},
+	}
+
+	var bits unsafe.Pointer
+	hbm, _, _ := procCreateDIBSection.Call(screenDC, uintptr(unsafe.Pointer(&bmi)), 0, uintptr(unsafe.Pointer(&bits)), 0, 0)
+	if hbm == 0 {
+		if !renderDbg.dib {
+			renderDbg.dib = true
+			println("CreateDIBSection failed, err:", getLastError())
+		}
+		procDeleteDC.Call(memDC)
+		return
+	}
+	procSelectObject.Call(memDC, hbm)
+
+	renderMemDC = memDC
+	renderBmp = hbm
+	renderBits = bits
+	renderW = w
+	renderH = h
 }
 
 func (a *App) resizeWindow(percent int) {
