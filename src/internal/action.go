@@ -181,6 +181,14 @@ func (a *App) updateMovement() {
 	if p.State != "walk" || p.Dragging {
 		return
 	}
+	// 移动期间强制循环 walk 动画：即便 GIF 自带有限 LoopCount（播完
+	// Playing 变 false），此处重置使其在移动结束前持续播放 move。
+	if p.CurrentAnim != nil && !p.CurrentAnim.Playing {
+		p.CurrentAnim.Current = 0
+		p.CurrentAnim.CurrentLoop = 0
+		p.CurrentAnim.Playing = true
+		p.CurrentAnim.LastUpdate = time.Now()
+	}
 	dx := p.TargetX - p.X
 	dy := p.TargetY - p.Y
 	dist := math.Sqrt(float64(dx*dx + dy*dy))
