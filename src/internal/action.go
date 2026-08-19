@@ -150,9 +150,12 @@ func (a *App) updateAI() {
 	case "idle":
 		if rand.Intn(10) == 0 {
 			a.switchAnim("walk")
+			// 随机方向 + 最小距离，保证走动足够久以完整播放 move.gif
+			angle := rand.Float64() * 2 * math.Pi
+			dist := 150 + rand.Float64()*250
 			p.TargetX, p.TargetY = a.clampToScreen(
-				p.X+int32(rand.Intn(200)-100),
-				p.Y+int32(rand.Intn(200)-100),
+				p.X+int32(math.Cos(angle)*dist),
+				p.Y+int32(math.Sin(angle)*dist),
 			)
 		} else if p.StateTimer > 20 && rand.Intn(5) == 0 {
 			a.switchAnim("sleep")
