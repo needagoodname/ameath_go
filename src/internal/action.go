@@ -152,9 +152,6 @@ func (a *App) updateAI() {
 			)
 		} else if p.StateTimer > 20 && rand.Intn(5) == 0 {
 			a.switchAnim("sleep")
-		} else if p.StateTimer > 0 && p.StateTimer%5 == 0 {
-			// 每 10s 随机换一个 idle 变体
-			a.switchAnim("idle")
 		}
 
 	case "walk":
@@ -281,10 +278,14 @@ func (a *App) LoadResources() error {
 		}
 	}
 
-	// 默认动画：优先 idle 首个变体，否则取第一个；无任何动画视为加载失败
+	// 默认动画：优先 idle2（第二变体），否则 idle 首个；再否则取第一个；
+	// 无任何动画视为加载失败
 	var base *Animator
 	if vs := anims["idle"]; len(vs) > 0 {
 		base = vs[0]
+		if len(vs) > 1 {
+			base = vs[1]
+		}
 	} else {
 		for _, vs := range anims {
 			if len(vs) > 0 {
