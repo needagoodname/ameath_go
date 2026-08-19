@@ -22,6 +22,14 @@ type App struct {
 	RenderedOnce bool
 	TrayIcon     []byte
 
+	// hopToken 用于让在途 playHop goroutine 检测到自己已过期而自行终止。
+	// 切换宠物 / 窗口销毁时递增。
+	hopToken uint64
+
+	// quit 在 WM_DESTROY 置位，之后 postCmd 不再入队，避免托盘 goroutine
+	// 向已销毁窗口投递命令导致死锁或写到非法 hwnd。
+	quit bool
+
 	cmdChan chan func()
 }
 
@@ -29,18 +37,19 @@ type App struct {
 var app *App
 
 func NewApp() *App {
-	app = &App{cmdChan: make(chan func(), 64)}
+	app = &App{cmdChan: make(chan func(), 256)}
 	return app
 }
 
 // postCmd 将状态变更投递到主线程执行（仅托盘 goroutine 调用）。
+// 采用阻塞 send：托盘 goroutine 阻塞不会影响主线程，主线程始终会排空 cmdChan；
+// 用户命令（静音/暂停/缩放等）不会被静默丢失。quit 置位后立即返回，避免向已销毁窗口投递。
 func (a *App) postCmd(f func()) {
-	select {
-	case a.cmdChan <- f:
-		procPostMessage.Call(a.Pet.Hwnd, WM_APP_EXEC_CMD, 0, 0)
-	default:
-		println("command queue full, command dropped")
+	if a.quit {
+		return
 	}
+	a.cmdChan <- f
+	procPostMessage.Call(a.Pet.Hwnd, WM_APP_EXEC_CMD, 0, 0)
 }
 
 // moveBy 相对移动窗口（仅主线程调用）。
@@ -53,12 +62,26 @@ func (a *App) moveBy(dx, dy int32) {
 
 // playHop happy 状态跳跃：3 次上下 20px，100ms 节奏。
 // 自身是 goroutine，移动经 postCmd 在主线程执行。
+// 捕获启动时的 pet 指针与 hopToken；若期间切换宠物或窗口销毁导致 token 变化，
+// 后续闭包直接 return，不再作用于新宠物或已销毁窗口。
 func (a *App) playHop() {
+	token := a.hopToken
+	pet := a.Pet
 	go func() {
 		for i := 0; i < 3; i++ {
-			a.postCmd(func() { a.moveBy(0, -20) })
+			a.postCmd(func() {
+				if a.hopToken != token || a.Pet != pet {
+					return
+				}
+				a.moveBy(0, -20)
+			})
 			time.Sleep(100 * time.Millisecond)
-			a.postCmd(func() { a.moveBy(0, 20) })
+			a.postCmd(func() {
+				if a.hopToken != token || a.Pet != pet {
+					return
+				}
+				a.moveBy(0, 20)
+			})
 			time.Sleep(100 * time.Millisecond)
 		}
 	}()

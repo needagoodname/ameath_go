@@ -5,17 +5,20 @@ import (
 	"image/draw"
 	"image/gif"
 	"os"
-	"sync"
 	"time"
 )
 
 // 动画帧
 type Frame struct {
 	Image *image.RGBA
+	// BGRA 是源尺寸的预转换 BGRA 字节流（normalizeFrames 后填充）。
+	// render 不再做每像素 RGBA→BGRA，直接从 BGRA 缩放到目标缓冲。
+	BGRA  []byte
 	Delay time.Duration
 }
 
-// 动画播放器
+// 动画播放器。仅由主线程访问（switchAnim/Update/GetFrame/render），
+// 不加锁；任何后台 goroutine 都不得持有 *Animator 后修改其字段。
 type Animator struct {
 	Frames      []Frame
 	Current     int
@@ -23,9 +26,13 @@ type Animator struct {
 	CurrentLoop int
 	LastUpdate  time.Time
 	Playing     bool
-	Mutex       sync.RWMutex
 	Width       int
 	Height      int
+	// scaled 是按当前 Pet.Width×Height 预缩放好的 BGRA 帧缓存；
+	// 命中后 render 退化为单次 copy 到 DIB。尺寸变化时由 ensureScaled 重建。
+	scaled  [][]byte
+	scaledW int
+	scaledH int
 }
 
 func (a *Animator) Update() {
@@ -35,9 +42,6 @@ func (a *Animator) Update() {
 
 	now := time.Now()
 	delay := a.Frames[a.Current].Delay
-
-	a.Mutex.Lock()
-	defer a.Mutex.Unlock()
 
 	if now.Sub(a.LastUpdate) < delay {
 		return
@@ -55,8 +59,6 @@ func (a *Animator) Update() {
 }
 
 func (a *Animator) GetFrame() *image.RGBA {
-	a.Mutex.RLock()
-	defer a.Mutex.RUnlock()
 	if a.Current < len(a.Frames) {
 		return a.Frames[a.Current].Image
 	}
@@ -171,10 +173,65 @@ func padFrame(fr Frame, w, h, oy int) Frame {
 }
 
 // normalizeFrames 将所有帧平铺到 w×h 画布并下移 oy（跨状态脚线对齐用）。
+// 同时为每帧生成源尺寸 BGRA 字节流，render 仅做最近邻缩放 + memcpy。
 func (a *Animator) normalizeFrames(w, h, oy int) {
 	for i, fr := range a.Frames {
-		a.Frames[i] = padFrame(fr, w, h, oy)
+		padded := padFrame(fr, w, h, oy)
+		padded.BGRA = rgbaToBGRA(padded.Image)
+		a.Frames[i] = padded
 	}
 	a.Width = w
 	a.Height = h
+	a.scaled = nil
+	a.scaledW = 0
+	a.scaledH = 0
+}
+
+// rgbaToBGRA 将 RGBA 帧转为 BGRA 字节流（Win32 DIB 期望的布局）。
+func rgbaToBGRA(src *image.RGBA) []byte {
+	w, h := src.Bounds().Dx(), src.Bounds().Dy()
+	out := make([]byte, w*h*4)
+	stride := src.Stride
+	for y := 0; y < h; y++ {
+		row := src.Pix[y*stride : y*stride+w*4]
+		for x := 0; x < w; x++ {
+			si := x * 4
+			di := (y*w + x) * 4
+			out[di] = row[si+2]   // B
+			out[di+1] = row[si+1] // G
+			out[di+2] = row[si]   // R
+			out[di+3] = row[si+3] // A
+		}
+	}
+	return out
+}
+
+// ensureScaled 按 dstW×dstH 重建预缩放 BGRA 帧缓存。仅在尺寸变化时重建，
+// 命中后 render 退化为单次 copy。内存换 CPU：典型宠物缓存约几 MB~几十 MB。
+func (a *Animator) ensureScaled(dstW, dstH int) {
+	if a.scaled != nil && a.scaledW == dstW && a.scaledH == dstH {
+		return
+	}
+	a.scaled = make([][]byte, len(a.Frames))
+	srcW := a.Width
+	srcH := a.Height
+	for i := range a.Frames {
+		src := a.Frames[i].BGRA
+		out := make([]byte, dstW*dstH*4)
+		for dy := 0; dy < dstH; dy++ {
+			sy := dy * srcH / dstH
+			for dx := 0; dx < dstW; dx++ {
+				sx := dx * srcW / dstW
+				si := (sy*srcW + sx) * 4
+				di := (dy*dstW + dx) * 4
+				out[di] = src[si]
+				out[di+1] = src[si+1]
+				out[di+2] = src[si+2]
+				out[di+3] = src[si+3]
+			}
+		}
+		a.scaled[i] = out
+	}
+	a.scaledW = dstW
+	a.scaledH = dstH
 }

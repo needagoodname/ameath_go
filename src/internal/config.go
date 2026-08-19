@@ -54,9 +54,18 @@ func (a *App) saveConfig() {
 	defer configMu.Unlock()
 
 	path := configPath()
-	os.MkdirAll(filepath.Dir(path), 0755)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		println("saveConfig: mkdir failed:", err.Error())
+		return
+	}
 
 	a.Cfg.AudioOn = a.AudioOn
-	data, _ := json.MarshalIndent(a.Cfg, "", "  ")
-	os.WriteFile(path, data, 0644)
+	data, err := json.MarshalIndent(a.Cfg, "", "  ")
+	if err != nil {
+		println("saveConfig: marshal failed:", err.Error())
+		return
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		println("saveConfig: write failed:", err.Error())
+	}
 }

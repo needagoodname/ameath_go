@@ -73,6 +73,7 @@ const (
 	WM_APP              = 0x8000
 	WM_APP_EXEC_CMD     = WM_APP + 1
 	WM_APP_QUIT         = WM_APP + 2
+	WM_DISPLAYCHANGE    = 0x021E
 	SM_CXSCREEN         = 0
 	SM_CYSCREEN         = 1
 	MF_STRING           = 0x0000
@@ -303,7 +304,25 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		procDestroyWindow.Call(hwnd) // 同步触发 WM_DESTROY
 		return 0
 
+	case WM_DISPLAYCHANGE:
+		// 显示器分辨率 / 工作区变化（插拔显示器、RDP、DPI 调整）后重采工作区
+		// 并把宠物拉回可见范围，避免越界或被任务栏遮挡。
+		var work RECT
+		procSystemParameters.Call(SPI_GETWORKAREA, 0, uintptr(unsafe.Pointer(&work)), 0)
+		if work.Right-work.Left > 0 && work.Bottom-work.Top > 0 {
+			app.ScreenX = work.Left
+			app.ScreenY = work.Top
+			app.ScreenW = work.Right - work.Left
+			app.ScreenH = work.Bottom - work.Top
+		}
+		app.Pet.X, app.Pet.Y = app.clampToScreen(app.Pet.X, app.Pet.Y)
+		procSetWindowPos.Call(app.Pet.Hwnd, 0, uintptr(app.Pet.X), uintptr(app.Pet.Y), 0, 0, 1|4)
+		return 0
+
 	case WM_DESTROY:
+		// 标记退出，使在途 postCmd 立即返回，避免向已销毁窗口投递
+		app.quit = true
+		app.hopToken++
 		procKillTimer.Call(hwnd, 1)
 		procKillTimer.Call(hwnd, 2)
 		procKillTimer.Call(hwnd, 3)
@@ -461,7 +480,7 @@ func (a *App) checkOcclusion() bool {
 		return false
 	}
 
-	pts := []POINT{
+	pts := [5]POINT{
 		{p.X + p.Width/2, p.Y + p.Height/2},
 		{p.X + p.Width/4, p.Y + p.Height/2},
 		{p.X + 3*p.Width/4, p.Y + p.Height/2},

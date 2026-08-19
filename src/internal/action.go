@@ -204,15 +204,37 @@ func (a *App) updateMovement() {
 	}
 }
 
-// DiscoverPets 扫描 assets 目录发现可用宠物
+// DiscoverPets 扫描 assets 目录发现可用宠物。
+// 合法宠物要求：目录下至少有一个含 *.gif 的状态子目录，
+// 避免误放的空目录 / 备份目录进入切换菜单。
 func (a *App) DiscoverPets() {
-	entries, err := os.ReadDir(assetsRoot())
+	root := assetsRoot()
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return
 	}
 	a.Pets = nil
 	for _, e := range entries {
-		if e.IsDir() {
+		if !e.IsDir() {
+			continue
+		}
+		petDir := filepath.Join(root, e.Name())
+		sub, err := os.ReadDir(petDir)
+		if err != nil {
+			continue
+		}
+		valid := false
+		for _, se := range sub {
+			if !se.IsDir() {
+				continue
+			}
+			gifs, _ := filepath.Glob(filepath.Join(petDir, se.Name(), "*.gif"))
+			if len(gifs) > 0 {
+				valid = true
+				break
+			}
+		}
+		if valid {
 			a.Pets = append(a.Pets, e.Name())
 		}
 	}
@@ -332,6 +354,11 @@ func (a *App) SwitchPet(name string) error {
 		return fmt.Errorf("pet %q not found", name)
 	}
 
+	// 取消在途 playHop（防止跳跃继续作用到新宠物）并清空音频队列
+	// （防止旧宠物的音效在新宠物加载后才播放）。
+	a.hopToken++
+	speakerClear()
+
 	oldAnims := p.Anims
 	oldSounds := p.Sounds
 	oldCurrent := p.CurrentAnim
@@ -386,11 +413,11 @@ func (a *App) render() {
 		return
 	}
 
-	frame := p.CurrentAnim.GetFrame()
-	if frame == nil {
+	anim := p.CurrentAnim
+	if anim.Current >= len(anim.Frames) || len(anim.Frames) == 0 {
 		if !renderDbg.frame {
 			renderDbg.frame = true
-			println("render skip: frame nil, current:", p.CurrentAnim.Current, "len:", len(p.CurrentAnim.Frames))
+			println("render skip: frame nil, current:", anim.Current, "len:", len(anim.Frames))
 		}
 		return
 	}
@@ -413,24 +440,13 @@ func (a *App) render() {
 		}
 	}
 
-	// 复制像素 BGRA（最近邻缩放）
-	pixels := unsafe.Slice((*byte)(renderBits), int(p.Width)*int(p.Height)*4)
-	srcW := int(p.BaseWidth)
-	srcH := int(p.BaseHeight)
-	dstW := int(p.Width)
-	dstH := int(p.Height)
-	for dy := 0; dy < dstH; dy++ {
-		sy := dy * srcH / dstH
-		for dx := 0; dx < dstW; dx++ {
-			sx := dx * srcW / dstW
-			c := frame.RGBAAt(sx, sy)
-			idx := (dy*dstW + dx) * 4
-			pixels[idx] = c.B
-			pixels[idx+1] = c.G
-			pixels[idx+2] = c.R
-			pixels[idx+3] = c.A
-		}
+	// 命中 scaled 缓存时，render 退化为单次 copy（DIB 自顶向下、BGRA 与缓存布局一致）
+	anim.ensureScaled(int(p.Width), int(p.Height))
+	if anim.Current >= len(anim.scaled) {
+		return
 	}
+	pixels := unsafe.Slice((*byte)(renderBits), int(p.Width)*int(p.Height)*4)
+	copy(pixels, anim.scaled[anim.Current])
 
 	blend := BLENDFUNCTION{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA}
 	src := POINT{0, 0}

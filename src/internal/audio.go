@@ -20,6 +20,19 @@ func (a *App) InitAudio() error {
 	return nil
 }
 
+// speakerClear 清空 speaker 播放队列（切换宠物 / 退出时调用）。
+// 仅主线程调用。
+func speakerClear() {
+	speaker.Clear()
+}
+
+// CloseAudio 关闭 speaker，释放底层 oto 设备。
+// 在主线程退出路径调用，避免音频 goroutine 在主进程退出后访问已释放资源。
+func (a *App) CloseAudio() {
+	speaker.Clear()
+	speaker.Close()
+}
+
 // playSound 播放状态对应音效（仅主线程调用；文件列表在此取值，
 // 解码与播放 goroutine 内只使用局部副本）。
 func (a *App) playSound(name string) {

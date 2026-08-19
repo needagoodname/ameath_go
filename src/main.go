@@ -58,6 +58,7 @@ func main() {
 	go systray.Run(internal.OnTrayReady, internal.OnTrayExit)
 	app.RunMessageLoop()
 
-	// 消息循环退出后清理托盘
+	// 消息循环退出后清理音频（主线程，无并发），再退出托盘
+	app.CloseAudio()
 	systray.Quit()
 }
