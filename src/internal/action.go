@@ -102,18 +102,22 @@ func (a *App) setAnim(state string, anim *Animator) {
 	}
 }
 
+// idle2Anim 返回 idle 第二变体（缺省第一个），无则返回 nil。
+func (a *App) idle2Anim() *Animator {
+	vs := a.Pet.Anims["idle"]
+	if len(vs) == 0 {
+		return nil
+	}
+	if len(vs) > 1 {
+		return vs[1]
+	}
+	return vs[0]
+}
+
 // switchToIdle2 行为结束后切到 idle2（第二变体，缺省用第一个）。
 func (a *App) switchToIdle2() {
-	p := a.Pet
-	vs := p.Anims["idle"]
-	if len(vs) == 0 {
-		return
-	}
-	anim := vs[0]
-	if len(vs) > 1 {
-		anim = vs[1]
-	}
-	if anim == p.CurrentAnim {
+	anim := a.idle2Anim()
+	if anim == nil || anim == a.Pet.CurrentAnim {
 		return
 	}
 	a.setAnim("idle", anim)
