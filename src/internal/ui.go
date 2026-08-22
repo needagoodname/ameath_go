@@ -100,7 +100,6 @@ func OnTrayReady() {
 						mPause.SetTitle("继续")
 					} else {
 						mPause.SetTitle("暂停")
-						app.Away = false
 					}
 				})
 			case <-mAutoStart.ClickedCh:

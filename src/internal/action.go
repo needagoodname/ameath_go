@@ -438,9 +438,9 @@ func (a *App) debugTick() {
 		playing = anim.Playing
 		loop = anim.CurrentLoop
 	}
-	println(fmt.Sprintf("[dbg] state=%s frame=%d/%d playing=%v loop=%d win=%dx%d renderW=%dx%d memDC=%d away=%v drag=%v paused=%v",
+	println(fmt.Sprintf("[dbg] state=%s frame=%d/%d playing=%v loop=%d win=%dx%d renderW=%dx%d memDC=%d drag=%v paused=%v",
 		p.State, cur, nframes, playing, loop, p.Width, p.Height,
-		renderW, renderH, renderMemDC, a.Away, p.Dragging, a.Paused))
+		renderW, renderH, renderMemDC, p.Dragging, a.Paused))
 }
 
 // render 渲染当前帧到分层窗口（仅主线程调用）
@@ -596,7 +596,7 @@ func (a *App) resizeWindow(percent int) {
 	a.Cfg.ScalePercent = percent
 	a.saveConfig()
 	// 立即按新尺寸重建 DIB 并重渲染分层表面。原先只依赖下一帧 WM_TIMER，
-	// 且渲染受 Paused/Away 影响会被跳过，导致窗口尺寸已变、表面仍是旧尺寸
+	// 且渲染可能被跳过，导致窗口尺寸已变、表面仍是旧尺寸
 	// （“窗口变大但宠物未缩放，只看到原图一部分”）。此处同步刷新保证一致。
 	a.render()
 }

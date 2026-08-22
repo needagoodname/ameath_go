@@ -37,7 +37,6 @@ var (
 	procSetCapture          = user32.NewProc("SetCapture")
 	procReleaseCapture      = user32.NewProc("ReleaseCapture")
 	procLoadCursor          = user32.NewProc("LoadCursorW")
-	procWindowFromPoint     = user32.NewProc("WindowFromPoint")
 	procDestroyWindow       = user32.NewProc("DestroyWindow")
 	procGetSystemMetrics    = user32.NewProc("GetSystemMetrics")
 	procSetProcessDPIAware  = user32.NewProc("SetProcessDPIAware")
@@ -56,6 +55,7 @@ const (
 	WS_EX_TRANSPARENT   = 0x00000020
 	WS_EX_TOOLWINDOW    = 0x00000080
 	WS_EX_NOACTIVATE    = 0x08000000
+	WS_EX_TOPMOST       = 0x00000008
 	WS_POPUP            = 0x80000000
 	WS_VISIBLE          = 0x10000000
 	WS_CLIPSIBLINGS     = 0x04000000
@@ -172,9 +172,11 @@ func (a *App) CreateWindow() {
 	// 注意：不加 WS_EX_TRANSPARENT，否则整个窗口会变成鼠标穿透，
 	// 宠物无法接收点击。透明区域点击穿透由 UpdateLayeredWindow 的
 	// per-pixel alpha（ULW_ALPHA + AC_SRC_ALPHA）自动处理。
-	// 先不带 WS_VISIBLE，等首帧渲染成功后再显示，避免启动时闪现黑框。
+	// WS_EX_TOPMOST：桌宠置顶，避免被普通窗口盖住（盖住后旧的遮挡检测
+	// 会自锁导致画面冻结）。先不带 WS_VISIBLE，等首帧渲染成功后再显示，
+	// 避免启动时闪现黑框。
 	hwnd, _, _ := procCreateWindowEx.Call(
-		WS_EX_LAYERED|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
+		WS_EX_LAYERED|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST,
 		uintptr(unsafe.Pointer(className)),
 		0, WS_POPUP,
 		uintptr(a.Pet.X), uintptr(a.Pet.Y),
@@ -191,8 +193,7 @@ func (a *App) CreateWindow() {
 
 	t1, _, _ := procSetTimer.Call(hwnd, 1, 16, 0)   // 60fps：动画+移动+渲染
 	t2, _, _ := procSetTimer.Call(hwnd, 2, 2000, 0) // AI 状态转移
-	t3, _, _ := procSetTimer.Call(hwnd, 3, 5000, 0) // 遮挡检测
-	println("timers:", t1, t2, t3)
+	println("timers:", t1, t2)
 }
 
 // RunMessageLoop 消息泵。GetMessage 返回 0（WM_QUIT）时退出。
@@ -245,19 +246,14 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 				}
 				app.maybeFinishBehavior()
 				app.updateMovement()
-				// 被遮挡时仅跳过渲染（省 CPU），AI/移动照常，
-				// 避免宠物卡在遮挡区域无法自行走出。
-				if !app.Away {
-					app.render()
-				}
+				// 始终渲染：原“被遮挡时跳过渲染”依赖 WindowFromPoint 对分层窗口
+				// 的命中测试，表面一旦陈旧就自锁（away 恒 true → 永不渲染，
+				// 画面停在最后一帧）。宠物已置顶（WS_EX_TOPMOST），始终渲染即可。
+				app.render()
 			}
 		} else if wParam == 2 {
 			if !app.Paused {
 				app.updateAI()
-			}
-		} else if wParam == 3 {
-			if !app.Paused && !app.Pet.Dragging {
-				app.Away = app.checkOcclusion()
 			}
 		}
 		return 0
@@ -269,7 +265,6 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		app.Pet.DragX = int32(int16(lParam & 0xFFFF))
 		app.Pet.DragY = int32(int16(lParam >> 16))
 		procSetCapture.Call(hwnd)
-		app.Away = false // 交互时立即恢复渲染
 		app.switchAnim("click")
 		return 0
 
@@ -344,7 +339,6 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		app.hopToken++
 		procKillTimer.Call(hwnd, 1)
 		procKillTimer.Call(hwnd, 2)
-		procKillTimer.Call(hwnd, 3)
 		app.Cfg.WindowX = app.Pet.X
 		app.Cfg.WindowY = app.Pet.Y
 		app.saveConfig()
@@ -440,9 +434,6 @@ func (a *App) showContextMenu() {
 		a.saveConfig()
 	case cmd == 3:
 		a.Paused = !a.Paused
-		if !a.Paused {
-			a.Away = false
-		}
 	case cmd == 6:
 		a.Cfg.AutoStart = !a.Cfg.AutoStart
 		if a.Cfg.AutoStart {
@@ -484,49 +475,4 @@ func getModule() uintptr {
 func loadCursor(id uintptr) uintptr {
 	c, _, _ := procLoadCursor.Call(0, id)
 	return c
-}
-
-// checkOcclusion 采样精灵不透明区域判断是否被其他窗口遮挡。
-// 仅不透明像素（alpha ≥ 32）参与 WindowFromPoint 命中判断，
-// 避免透明像素被误判为被遮挡。
-func (a *App) checkOcclusion() bool {
-	p := a.Pet
-	if p.Hwnd == 0 || p.CurrentAnim == nil {
-		return false
-	}
-	frame := p.CurrentAnim.GetFrame()
-	if frame == nil {
-		return false
-	}
-
-	pts := [5]POINT{
-		{p.X + p.Width/2, p.Y + p.Height/2},
-		{p.X + p.Width/4, p.Y + p.Height/2},
-		{p.X + 3*p.Width/4, p.Y + p.Height/2},
-		{p.X + p.Width/2, p.Y + p.Height/4},
-		{p.X + p.Width/2, p.Y + 3*p.Height/4},
-	}
-	checked := 0
-	for _, pt := range pts {
-		// 屏幕坐标换算为精灵坐标检查透明度
-		sx := int(pt.X-p.X) * int(p.BaseWidth) / int(p.Width)
-		sy := int(pt.Y-p.Y) * int(p.BaseHeight) / int(p.Height)
-		if sx < 0 || sy < 0 || sx >= int(p.BaseWidth) || sy >= int(p.BaseHeight) {
-			continue
-		}
-		if frame.RGBAAt(sx, sy).A < 32 {
-			continue
-		}
-		checked++
-		h, _, _ := procWindowFromPoint.Call(uintptr(uint32(pt.X)) | uintptr(uint32(pt.Y))<<32)
-		if h == p.Hwnd {
-			return false
-		}
-	}
-	// 没有任何可判定的不透明采样点（透明/越界）：不能断言被遮挡，
-	// 避免 checkOcclusion 误报导致 render 被跳过、画面冻结。
-	if checked == 0 {
-		return false
-	}
-	return true
 }

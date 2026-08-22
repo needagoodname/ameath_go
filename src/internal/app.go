@@ -12,7 +12,6 @@ type App struct {
 	Cfg     Config
 	AudioOn bool
 	Paused  bool
-	Away    bool
 	Pets    []string
 	ScreenW int32
 	ScreenH int32
@@ -62,7 +61,7 @@ func (a *App) moveBy(dx, dy int32) {
 
 // releaseDrag 强制结束拖拽状态（正常释放 / 捕获丢失 WM_CAPTURECHANGED /
 // 看门狗超时共用）。清除 Dragging 以解锁 AI、一次性行为结束与移动逻辑，
-// 并复位 Away 恢复渲染，避免 WM_LBUTTONUP 丢失导致状态机永久冻结
+// 避免 WM_LBUTTONUP 丢失导致状态机永久冻结
 // （表现为“所有动作结束后都无法切回 idle、画面停在最后一帧”）。
 func (a *App) releaseDrag() {
 	p := a.Pet
@@ -74,7 +73,6 @@ func (a *App) releaseDrag() {
 	if p.Hwnd != 0 {
 		procReleaseCapture.Call(p.Hwnd)
 	}
-	a.Away = false
 }
 
 // playHop happy 状态跳跃：3 次上下 20px，100ms 节奏。
