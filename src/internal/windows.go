@@ -265,6 +265,10 @@ func (a *App) assertTopmost() {
 	if !a.isTopmost() {
 		return
 	}
+	// 右键菜单弹出期间暂停重顶：否则桌宠会把自己顶到菜单上方把菜单盖住。
+	if a.MenuOpen {
+		return
+	}
 	procSetWindowPos.Call(a.Pet.Hwnd, HWND_TOPMOST, 0, 0, 0, 0,
 		SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)
 }
@@ -494,10 +498,16 @@ func (a *App) showContextMenu() {
 	var pt POINT
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
 
+	// 菜单弹出期间置 MenuOpen，暂停周期置顶，避免桌宠盖住自己的右键菜单；
+	// TrackPopupMenu 在菜单关闭前阻塞，期间 WM_TIMER 仍会派发。
+	a.MenuOpen = true
 	cmd, _, _ := procTrackPopupMenu.Call(
 		menu, TPM_RETURNCMD|TPM_NONOTIFY|TPM_RIGHTBUTTON,
 		uintptr(pt.X), uintptr(pt.Y), 0, a.Pet.Hwnd, 0,
 	)
+	a.MenuOpen = false
+	// 菜单关闭后立即恢复置顶，避免桌宠停留被盖的位置
+	a.assertTopmost()
 
 	switch {
 	case cmd == 1:

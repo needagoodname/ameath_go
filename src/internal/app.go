@@ -29,6 +29,10 @@ type App struct {
 	// 向已销毁窗口投递命令导致死锁或写到非法 hwnd。
 	quit bool
 
+	// MenuOpen 在右键菜单弹出期间为 true（仅主线程读写）。周期置顶
+	// assertTopmost 据此暂停，避免桌宠每 250ms 重顶时盖住自己的菜单。
+	MenuOpen bool
+
 	cmdChan chan func()
 }
 
