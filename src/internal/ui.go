@@ -26,10 +26,6 @@ func OnTrayReady() {
 	systray.AddSeparator()
 
 	mToggle := systray.AddMenuItem("显示/隐藏", "")
-	mMute := systray.AddMenuItem("静音", "")
-	if !app.AudioOn {
-		mMute.SetTitle("取消静音")
-	}
 	mPause := systray.AddMenuItem("暂停", "")
 	mTopmost := systray.AddMenuItem("置顶", "")
 	if app.Cfg.AlwaysOnTop {
@@ -100,17 +96,6 @@ func OnTrayReady() {
 						procShowWindow.Call(app.Pet.Hwnd, 0)
 					} else {
 						procShowWindow.Call(app.Pet.Hwnd, SW_SHOWNOACTIVATE)
-					}
-				})
-			case <-mMute.ClickedCh:
-				app.postCmd(func() {
-					app.AudioOn = !app.AudioOn
-					app.Cfg.AudioOn = app.AudioOn
-					app.saveConfig()
-					if app.AudioOn {
-						mMute.SetTitle("静音")
-					} else {
-						mMute.SetTitle("取消静音")
 					}
 				})
 			case <-mPause.ClickedCh:

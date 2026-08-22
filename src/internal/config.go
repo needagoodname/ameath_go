@@ -9,7 +9,6 @@ import (
 
 // Config 持久化配置
 type Config struct {
-	AudioOn      bool   `json:"audio_on"`
 	AutoStart    bool   `json:"auto_start"`
 	CurrentPet   string `json:"current_pet"`
 	WindowX      int32  `json:"window_x"`
@@ -33,7 +32,6 @@ func configPath() string {
 // LoadConfig 加载配置，不存在则创建默认值
 func (a *App) LoadConfig() {
 	a.Cfg = Config{
-		AudioOn:       true,
 		AutoStart:     false,
 		WindowX:       100,
 		WindowY:       100,
@@ -58,7 +56,6 @@ func (a *App) LoadConfig() {
 	} else if a.Cfg.VolumePercent > 100 {
 		a.Cfg.VolumePercent = 100
 	}
-	a.AudioOn = a.Cfg.AudioOn
 }
 
 func (a *App) saveConfig() {
@@ -71,7 +68,6 @@ func (a *App) saveConfig() {
 		return
 	}
 
-	a.Cfg.AudioOn = a.AudioOn
 	data, err := json.MarshalIndent(a.Cfg, "", "  ")
 	if err != nil {
 		println("saveConfig: marshal failed:", err.Error())

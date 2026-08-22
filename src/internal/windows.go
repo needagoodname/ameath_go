@@ -466,13 +466,12 @@ func (a *App) showContextMenu() {
 	}
 
 	appendMenuString(menu, MF_STRING, 1, "显示/隐藏")
-	appendMenuString(menu, MF_STRING, 2, "静音")
-	appendMenuString(menu, MF_STRING, 3, "暂停")
+	appendMenuString(menu, MF_STRING, 2, "暂停")
 	topTitle := "置顶"
 	if a.isTopmost() {
 		topTitle = "✓ 置顶"
 	}
-	appendMenuString(menu, MF_STRING, 4, topTitle)
+	appendMenuString(menu, MF_STRING, 3, topTitle)
 	appendMenuString(menu, MF_SEPARATOR, 0, "")
 
 	petMenu, _, _ := procCreatePopupMenu.Call()
@@ -508,9 +507,9 @@ func (a *App) showContextMenu() {
 	appendMenuString(menu, MF_POPUP, volumeMenu, "音量")
 
 	appendMenuString(menu, MF_SEPARATOR, 0, "")
-	appendMenuString(menu, MF_STRING, 6, "开机启动")
+	appendMenuString(menu, MF_STRING, 5, "开机启动")
 	appendMenuString(menu, MF_SEPARATOR, 0, "")
-	appendMenuString(menu, MF_STRING, 7, "退出")
+	appendMenuString(menu, MF_STRING, 6, "退出")
 
 	var pt POINT
 	procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
@@ -536,15 +535,11 @@ func (a *App) showContextMenu() {
 			procShowWindow.Call(a.Pet.Hwnd, SW_SHOWNOACTIVATE)
 		}
 	case cmd == 2:
-		a.AudioOn = !a.AudioOn
-		a.Cfg.AudioOn = a.AudioOn
-		a.saveConfig()
-	case cmd == 3:
 		a.Paused = !a.Paused
-	case cmd == 4:
+	case cmd == 3:
 		a.setTopmost(!a.isTopmost())
 		a.saveConfig()
-	case cmd == 6:
+	case cmd == 5:
 		a.Cfg.AutoStart = !a.Cfg.AutoStart
 		if a.Cfg.AutoStart {
 			EnableAutoStart()
@@ -552,7 +547,7 @@ func (a *App) showContextMenu() {
 			DisableAutoStart()
 		}
 		a.saveConfig()
-	case cmd == 7:
+	case cmd == 6:
 		procPostMessage.Call(a.Pet.Hwnd, WM_APP_QUIT, 0, 0)
 	case cmd >= 100 && cmd < 200:
 		if i := int(cmd - 100); i < len(a.Pets) {

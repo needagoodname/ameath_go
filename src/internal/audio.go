@@ -19,6 +19,7 @@ func (a *App) InitAudio() error {
 		a.AudioOn = false
 		return err
 	}
+	a.AudioOn = true
 	return nil
 }
 

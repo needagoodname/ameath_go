@@ -46,7 +46,7 @@ func NewApp() *App {
 
 // postCmd 将状态变更投递到主线程执行（仅托盘 goroutine 调用）。
 // 采用阻塞 send：托盘 goroutine 阻塞不会影响主线程，主线程始终会排空 cmdChan；
-// 用户命令（静音/暂停/缩放等）不会被静默丢失。quit 置位后立即返回，避免向已销毁窗口投递。
+// 用户命令（暂停/缩放/音量等）不会被静默丢失。quit 置位后立即返回，避免向已销毁窗口投递。
 func (a *App) postCmd(f func()) {
 	if a.quit {
 		return
