@@ -496,7 +496,7 @@ func (a *App) showContextMenu() {
 	}
 	appendMenuString(menu, MF_POPUP, scaleMenu, "缩放")
 
-	volumePresets := []int{25, 50, 75, 100, 150, 200, 300}
+	volumePresets := []int{0, 25, 50, 75, 100}
 	volumeMenu, _, _ := procCreatePopupMenu.Call()
 	for i, pct := range volumePresets {
 		title := fmt.Sprintf("%d%%", pct)

@@ -66,9 +66,9 @@ func OnTrayReady() {
 		scaleMenuItems[pct] = item
 	}
 
-	// 音量子菜单
+	// 音量子菜单（0~100%）
 	mVolume := systray.AddMenuItem("音量", "")
-	volumePresets := []int{25, 50, 75, 100, 150, 200, 300}
+	volumePresets := []int{0, 25, 50, 75, 100}
 	volumeMenuItems := make(map[int]*systray.MenuItem)
 	for _, pct := range volumePresets {
 		title := fmt.Sprintf("%d%%", pct)

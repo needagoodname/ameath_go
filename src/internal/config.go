@@ -16,7 +16,7 @@ type Config struct {
 	WindowY      int32  `json:"window_y"`
 	ScalePercent int    `json:"scale_percent"`
 	AlwaysOnTop  bool   `json:"always_on_top"`
-	// VolumePercent 音量百分比：100=原音量，可调 25~300，0 视为未设置（旧配置缺省）。
+	// VolumePercent 音量百分比：0~100，100=原音量，0=静音。
 	VolumePercent int `json:"volume_percent"`
 }
 
@@ -51,8 +51,11 @@ func (a *App) LoadConfig() {
 	if a.Cfg.ScalePercent <= 0 {
 		a.Cfg.ScalePercent = 100
 	}
-	// 旧配置无 volume_percent 字段时为零值，统一回退到 100%
-	if a.Cfg.VolumePercent == 0 {
+	// 音量限制在 0~100：旧配置缺省（预置 100 保留）或超出范围的
+	// 历史值（此前最高 300%）统一钳制到合法区间；0 为静音。
+	if a.Cfg.VolumePercent < 0 {
+		a.Cfg.VolumePercent = 0
+	} else if a.Cfg.VolumePercent > 100 {
 		a.Cfg.VolumePercent = 100
 	}
 	a.AudioOn = a.Cfg.AudioOn
