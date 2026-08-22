@@ -231,6 +231,8 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 
 	case WM_TIMER:
 		if wParam == 1 {
+			// 诊断：每秒打印一次状态（控制台版本可见）
+			app.debugTick()
 			// 拖拽看门狗：超过 10s 无鼠标输入仍处于拖拽则强制释放，
 			// 兜底 WM_LBUTTONUP / WM_CAPTURECHANGED 都未收到的情况，
 			// 避免 Dragging 卡死导致所有动作无法结束/切回 idle。

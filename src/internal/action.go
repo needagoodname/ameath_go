@@ -96,6 +96,8 @@ func (a *App) setAnim(state string, anim *Animator) {
 	p.State = state
 	p.StateTimer = 0
 
+	println("[dbg] setAnim:", state, "loopCount:", anim.LoopCount, "frames:", len(anim.Frames))
+
 	// 同状态换变体（如 idle 随机轮换）不重复播放音效
 	if a.AudioOn && changed {
 		a.playSound(state)
@@ -404,7 +406,7 @@ func (a *App) SwitchPet(name string) error {
 }
 
 // renderDbg 记录渲染早退点是否已打印过（仅主线程访问）
-var renderDbg = struct{ guard, frame, dc, dib bool }{}
+var renderDbg = struct{ guard, frame, dc, dib, mismatch, scaled bool }{}
 
 // 渲染缓存（仅主线程访问）：复用 memDC/DIB，避免每帧分配 GDI 对象
 // 泄漏导致对象耗尽后 CreateDIBSection 失败而画面卡死。
@@ -414,6 +416,32 @@ var (
 	renderBits       unsafe.Pointer
 	renderW, renderH int32
 )
+
+// lastDbgTick 用于 debugTick 节流（仅主线程访问）
+var lastDbgTick time.Time
+
+// debugTick 每秒打印一次关键状态，用于定位“动画卡住/不切换”问题。
+// 诊断用：能区分是逻辑卡死（frame 不前进 / Playing=false）还是渲染卡死
+// （frame 在前进但 renderW 与 pet 尺寸不匹配 / render 被跳过）。
+func (a *App) debugTick() {
+	now := time.Now()
+	if now.Sub(lastDbgTick) < time.Second {
+		return
+	}
+	lastDbgTick = now
+	p := a.Pet
+	anim := p.CurrentAnim
+	cur, nframes, playing, loop := -1, 0, false, 0
+	if anim != nil {
+		cur = anim.Current
+		nframes = len(anim.Frames)
+		playing = anim.Playing
+		loop = anim.CurrentLoop
+	}
+	println(fmt.Sprintf("[dbg] state=%s frame=%d/%d playing=%v loop=%d win=%dx%d renderW=%dx%d memDC=%d away=%v drag=%v paused=%v",
+		p.State, cur, nframes, playing, loop, p.Width, p.Height,
+		renderW, renderH, renderMemDC, a.Away, p.Dragging, a.Paused))
+}
 
 // render 渲染当前帧到分层窗口（仅主线程调用）
 func (a *App) render() {
@@ -455,12 +483,21 @@ func (a *App) render() {
 	// 重建失败时保留旧 target；尺寸不匹配则直接返回（下一帧再试），
 	// 避免用旧尺寸 DIB 按新尺寸读写造成越界或内容错乱。
 	if renderW != p.Width || renderH != p.Height {
+		if !renderDbg.mismatch {
+			renderDbg.mismatch = true
+			println("[dbg] render skip: size mismatch renderW/H=", renderW, renderH,
+				"pet=", p.Width, p.Height)
+		}
 		return
 	}
 
 	// 命中 scaled 缓存时，render 退化为单次 copy（DIB 自顶向下、BGRA 与缓存布局一致）
 	anim.ensureScaled(int(p.Width), int(p.Height))
 	if anim.Current >= len(anim.scaled) {
+		if !renderDbg.scaled {
+			renderDbg.scaled = true
+			println("[dbg] render skip: scaled empty, current:", anim.Current, "len:", len(anim.scaled))
+		}
 		return
 	}
 	pixels := unsafe.Slice((*byte)(renderBits), int(p.Width)*int(p.Height)*4)
