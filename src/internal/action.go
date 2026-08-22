@@ -163,6 +163,10 @@ func (a *App) updateAI() {
 			)
 		} else if p.StateTimer > 20 && rand.Intn(5) == 0 {
 			a.switchAnim("sleep")
+		} else if p.StateTimer > 0 && p.StateTimer%5 == 0 {
+			// 间隔期间随机轮换 idle 变体（idle1~4）：
+			// move 结束后固定进 idle2，待机区间再随机切到其它 idle 行为，避免一直盯同一个动作
+			a.switchAnim("idle")
 		}
 
 	case "walk":
