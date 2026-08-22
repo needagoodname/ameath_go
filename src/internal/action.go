@@ -438,9 +438,9 @@ func (a *App) debugTick() {
 		playing = anim.Playing
 		loop = anim.CurrentLoop
 	}
-	println(fmt.Sprintf("[dbg] state=%s frame=%d/%d playing=%v loop=%d win=%dx%d renderW=%dx%d memDC=%d drag=%v paused=%v",
+	println(fmt.Sprintf("[dbg] state=%s frame=%d/%d playing=%v loop=%d win=%dx%d renderW=%dx%d memDC=%d drag=%v paused=%v topmost=%v",
 		p.State, cur, nframes, playing, loop, p.Width, p.Height,
-		renderW, renderH, renderMemDC, p.Dragging, a.Paused))
+		renderW, renderH, renderMemDC, p.Dragging, a.Paused, a.isTopmost()))
 }
 
 // render 渲染当前帧到分层窗口（仅主线程调用）
@@ -519,6 +519,7 @@ func (a *App) render() {
 	} else if !a.RenderedOnce {
 		a.RenderedOnce = true
 		procShowWindow.Call(p.Hwnd, SW_SHOWNOACTIVATE)
+		a.assertTopmost() // 首帧显示后立刻置顶，避免被其它窗口先盖住
 		println("first render ok at", p.X, ",", p.Y, "size:", p.Width, "x", p.Height)
 	}
 }

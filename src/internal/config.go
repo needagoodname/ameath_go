@@ -15,6 +15,7 @@ type Config struct {
 	WindowX      int32  `json:"window_x"`
 	WindowY      int32  `json:"window_y"`
 	ScalePercent int    `json:"scale_percent"`
+	AlwaysOnTop  bool   `json:"always_on_top"`
 }
 
 var configMu sync.Mutex
@@ -30,10 +31,11 @@ func configPath() string {
 // LoadConfig 加载配置，不存在则创建默认值
 func (a *App) LoadConfig() {
 	a.Cfg = Config{
-		AudioOn:   true,
-		AutoStart: false,
-		WindowX:   100,
-		WindowY:   100,
+		AudioOn:     true,
+		AutoStart:   false,
+		WindowX:     100,
+		WindowY:     100,
+		AlwaysOnTop: true,
 	}
 
 	path := configPath()

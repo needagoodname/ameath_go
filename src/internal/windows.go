@@ -34,6 +34,7 @@ var (
 	procSetWindowPos        = user32.NewProc("SetWindowPos")
 	procShowWindow          = user32.NewProc("ShowWindow")
 	procGetWindowLong       = user32.NewProc("GetWindowLongW")
+	procSetWindowLong       = user32.NewProc("SetWindowLongW")
 	procSetCapture          = user32.NewProc("SetCapture")
 	procReleaseCapture      = user32.NewProc("ReleaseCapture")
 	procLoadCursor          = user32.NewProc("LoadCursorW")
@@ -72,6 +73,20 @@ const (
 	AC_SRC_ALPHA        = 0x01
 	SW_SHOWNOACTIVATE   = 4
 	GWL_STYLE           = -16
+	GWL_EXSTYLE         = -20
+
+	// SetWindowPos 的 hWndInsertAfter 取值
+	HWND_TOP       = 0
+	HWND_BOTTOM    = 1
+	HWND_TOPMOST   = ^uintptr(0) // (HWND)-1
+	HWND_NOTOPMOST = ^uintptr(1) // (HWND)-2
+
+	// SetWindowPos 标志位
+	SWP_NOSIZE     = 0x0001
+	SWP_NOMOVE     = 0x0002
+	SWP_NOZORDER   = 0x0004
+	SWP_NOACTIVATE = 0x0010
+
 	WM_APP              = 0x8000
 	WM_APP_EXEC_CMD     = WM_APP + 1
 	WM_APP_QUIT         = WM_APP + 2
@@ -174,9 +189,13 @@ func (a *App) CreateWindow() {
 	// per-pixel alpha（ULW_ALPHA + AC_SRC_ALPHA）自动处理。
 	// WS_EX_TOPMOST：桌宠置顶，避免被普通窗口盖住（盖住后旧的遮挡检测
 	// 会自锁导致画面冻结）。先不带 WS_VISIBLE，等首帧渲染成功后再显示，
-	// 避免启动时闪现黑框。
+	// 避免启动时闪现黑框。置顶与否可在菜单切换并持久化（Cfg.AlwaysOnTop）。
+	exStyle := uintptr(WS_EX_LAYERED) | uintptr(WS_EX_TOOLWINDOW) | uintptr(WS_EX_NOACTIVATE)
+	if a.Cfg.AlwaysOnTop {
+		exStyle |= WS_EX_TOPMOST
+	}
 	hwnd, _, _ := procCreateWindowEx.Call(
-		WS_EX_LAYERED|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_TOPMOST,
+		exStyle,
 		uintptr(unsafe.Pointer(className)),
 		0, WS_POPUP,
 		uintptr(a.Pet.X), uintptr(a.Pet.Y),
@@ -194,6 +213,60 @@ func (a *App) CreateWindow() {
 	t1, _, _ := procSetTimer.Call(hwnd, 1, 16, 0)   // 60fps：动画+移动+渲染
 	t2, _, _ := procSetTimer.Call(hwnd, 2, 2000, 0) // AI 状态转移
 	println("timers:", t1, t2)
+}
+
+// isTopmost 判断当前窗口扩展样式是否置顶（仅主线程调用）。
+func (a *App) isTopmost() bool {
+	if a.Pet == nil || a.Pet.Hwnd == 0 {
+		return a.Cfg.AlwaysOnTop
+	}
+	gwl := int32(GWL_EXSTYLE)
+	ex, _, _ := procGetWindowLong.Call(a.Pet.Hwnd, uintptr(gwl))
+	return ex&WS_EX_TOPMOST != 0
+}
+
+// setTopmost 设置/取消窗口置顶（仅主线程调用）。
+// 置顶：设置 WS_EX_TOPMOST 后以 HWND_TOPMOST 重新插入 Z 序顶部，
+// 让宠物压过普通窗口及其它置顶窗口；取消：清除样式并降回 HWND_NOTOPMOST。
+func (a *App) setTopmost(on bool) {
+	if a.Pet == nil || a.Pet.Hwnd == 0 {
+		return
+	}
+	gwl := int32(GWL_EXSTYLE)
+	ex, _, _ := procGetWindowLong.Call(a.Pet.Hwnd, uintptr(gwl))
+	if on {
+		procSetWindowLong.Call(a.Pet.Hwnd, uintptr(gwl), ex|WS_EX_TOPMOST)
+		procSetWindowPos.Call(a.Pet.Hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+			SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)
+	} else {
+		procSetWindowLong.Call(a.Pet.Hwnd, uintptr(gwl), ex&^WS_EX_TOPMOST)
+		procSetWindowPos.Call(a.Pet.Hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+			SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)
+	}
+	a.Cfg.AlwaysOnTop = on
+}
+
+// lastTopmostAssert 周期置顶节流（仅主线程访问）。
+var lastTopmostAssert time.Time
+
+// assertTopmost 置顶开启时，周期性把宠物重新顶到 Z 序最上方（仅主线程调用）。
+// 浏览器/播放器等窗口进入全屏或获焦时可能把自己抬到置顶层盖住桌宠；
+// 这里每 ~250ms 用 HWND_TOPMOST 重插一次，保证桌宠始终压在最上面
+// （包括浏览器全屏）。置顶关闭时不做任何事。
+func (a *App) assertTopmost() {
+	now := time.Now()
+	if now.Sub(lastTopmostAssert) < 250*time.Millisecond {
+		return
+	}
+	lastTopmostAssert = now
+	if a.Pet == nil || a.Pet.Hwnd == 0 {
+		return
+	}
+	if !a.isTopmost() {
+		return
+	}
+	procSetWindowPos.Call(a.Pet.Hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+		SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE)
 }
 
 // RunMessageLoop 消息泵。GetMessage 返回 0（WM_QUIT）时退出。
@@ -240,6 +313,8 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 			if app.Pet.Dragging && time.Since(app.Pet.DragActivity) > 10*time.Second {
 				app.releaseDrag()
 			}
+			// 置顶开启时周期性重插 Z 序顶部，防止浏览器获焦/全屏后盖住桌宠。
+			app.assertTopmost()
 			if !app.Paused {
 				if app.Pet.CurrentAnim != nil {
 					app.Pet.CurrentAnim.Update()
@@ -383,6 +458,11 @@ func (a *App) showContextMenu() {
 	appendMenuString(menu, MF_STRING, 1, "显示/隐藏")
 	appendMenuString(menu, MF_STRING, 2, "静音")
 	appendMenuString(menu, MF_STRING, 3, "暂停")
+	topTitle := "置顶"
+	if a.isTopmost() {
+		topTitle = "✓ 置顶"
+	}
+	appendMenuString(menu, MF_STRING, 4, topTitle)
 	appendMenuString(menu, MF_SEPARATOR, 0, "")
 
 	petMenu, _, _ := procCreatePopupMenu.Call()
@@ -434,6 +514,9 @@ func (a *App) showContextMenu() {
 		a.saveConfig()
 	case cmd == 3:
 		a.Paused = !a.Paused
+	case cmd == 4:
+		a.setTopmost(!a.isTopmost())
+		a.saveConfig()
 	case cmd == 6:
 		a.Cfg.AutoStart = !a.Cfg.AutoStart
 		if a.Cfg.AutoStart {

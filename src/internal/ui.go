@@ -28,6 +28,10 @@ func OnTrayReady() {
 	mToggle := systray.AddMenuItem("显示/隐藏", "")
 	mMute := systray.AddMenuItem("静音", "")
 	mPause := systray.AddMenuItem("暂停", "")
+	mTopmost := systray.AddMenuItem("置顶", "")
+	if app.Cfg.AlwaysOnTop {
+		mTopmost.SetTitle("置顶 ✓")
+	}
 	systray.AddSeparator()
 
 	// 宠物切换子菜单
@@ -100,6 +104,16 @@ func OnTrayReady() {
 						mPause.SetTitle("继续")
 					} else {
 						mPause.SetTitle("暂停")
+					}
+				})
+			case <-mTopmost.ClickedCh:
+				app.postCmd(func() {
+					app.setTopmost(!app.isTopmost())
+					app.saveConfig()
+					if app.Cfg.AlwaysOnTop {
+						mTopmost.SetTitle("置顶 ✓")
+					} else {
+						mTopmost.SetTitle("置顶")
 					}
 				})
 			case <-mAutoStart.ClickedCh:
