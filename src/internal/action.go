@@ -395,6 +395,9 @@ func (a *App) SwitchPet(name string) error {
 		uintptr(p.Width), uintptr(p.Height),
 		0x0002|0x0004)
 
+	// 立即按新尺寸重渲染，避免窗口已变而分层表面仍是旧内容
+	a.render()
+
 	return nil
 }
 
@@ -447,6 +450,11 @@ func (a *App) render() {
 			return
 		}
 	}
+	// 重建失败时保留旧 target；尺寸不匹配则直接返回（下一帧再试），
+	// 避免用旧尺寸 DIB 按新尺寸读写造成越界或内容错乱。
+	if renderW != p.Width || renderH != p.Height {
+		return
+	}
 
 	// 命中 scaled 缓存时，render 退化为单次 copy（DIB 自顶向下、BGRA 与缓存布局一致）
 	anim.ensureScaled(int(p.Width), int(p.Height))
@@ -477,20 +485,11 @@ func (a *App) render() {
 }
 
 // rebuildRenderTarget 按窗口尺寸重建 memDC 与 DIB（仅主线程调用）。
+// 先构建新 target，成功后再替换旧的；失败则保留旧 target 供下一帧重试，
+// 避免“删除旧 DIB 后创建新 DIB 失败”导致渲染永久停摆。
 func (a *App) rebuildRenderTarget(screenDC uintptr, w, h int32) {
-	if renderMemDC != 0 {
-		procDeleteDC.Call(renderMemDC)
-		renderMemDC = 0
-	}
-	if renderBmp != 0 {
-		procDeleteObject.Call(renderBmp)
-		renderBmp = 0
-	}
-	renderBits = nil
-	renderW, renderH = 0, 0
-
-	memDC, _, _ := procCreateCompatibleDC.Call(screenDC)
-	if memDC == 0 {
+	newDC, _, _ := procCreateCompatibleDC.Call(screenDC)
+	if newDC == 0 {
 		return
 	}
 
@@ -528,12 +527,19 @@ func (a *App) rebuildRenderTarget(screenDC uintptr, w, h int32) {
 			renderDbg.dib = true
 			println("CreateDIBSection failed, err:", getLastError())
 		}
-		procDeleteDC.Call(memDC)
+		procDeleteDC.Call(newDC)
 		return
 	}
-	procSelectObject.Call(memDC, hbm)
+	procSelectObject.Call(newDC, hbm)
 
-	renderMemDC = memDC
+	// 成功后再释放旧 target 并替换
+	if renderMemDC != 0 {
+		procDeleteDC.Call(renderMemDC)
+	}
+	if renderBmp != 0 {
+		procDeleteObject.Call(renderBmp)
+	}
+	renderMemDC = newDC
 	renderBmp = hbm
 	renderBits = bits
 	renderW = w
@@ -542,9 +548,16 @@ func (a *App) rebuildRenderTarget(screenDC uintptr, w, h int32) {
 
 func (a *App) resizeWindow(percent int) {
 	a.Pet.SetScale(percent)
-	procSetWindowPos.Call(a.Pet.Hwnd, 0, 0, 0,
+	// 缩放后窗口变大，把宠物重新钳制到屏幕/工作区内，避免被屏幕边缘裁掉
+	a.Pet.X, a.Pet.Y = a.clampToScreen(a.Pet.X, a.Pet.Y)
+	procSetWindowPos.Call(a.Pet.Hwnd, 0,
+		uintptr(a.Pet.X), uintptr(a.Pet.Y),
 		uintptr(a.Pet.Width), uintptr(a.Pet.Height),
-		0x0002|0x0004) // SWP_NOMOVE | SWP_NOZORDER
+		0x0004) // SWP_NOZORDER（位置已由 clamp 决定）
 	a.Cfg.ScalePercent = percent
 	a.saveConfig()
+	// 立即按新尺寸重建 DIB 并重渲染分层表面。原先只依赖下一帧 WM_TIMER，
+	// 且渲染受 Paused/Away 影响会被跳过，导致窗口尺寸已变、表面仍是旧尺寸
+	// （“窗口变大但宠物未缩放，只看到原图一部分”）。此处同步刷新保证一致。
+	a.render()
 }
