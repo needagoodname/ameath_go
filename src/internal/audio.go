@@ -66,6 +66,7 @@ func (a *App) playSound(name string) {
 		}
 
 		if err != nil {
+			println("playSound: decode failed:", file, ":", err.Error())
 			f.Close()
 			return
 		}

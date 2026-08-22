@@ -27,6 +27,9 @@ func OnTrayReady() {
 
 	mToggle := systray.AddMenuItem("显示/隐藏", "")
 	mMute := systray.AddMenuItem("静音", "")
+	if !app.AudioOn {
+		mMute.SetTitle("取消静音")
+	}
 	mPause := systray.AddMenuItem("暂停", "")
 	mTopmost := systray.AddMenuItem("置顶", "")
 	if app.Cfg.AlwaysOnTop {
