@@ -30,6 +30,22 @@ cd src
 GOOS=windows CGO_ENABLED=0 go build ./...
 ```
 
+### exe 图标（.syso 资源）
+
+exe 自身的图标/清单/版本信息由 `src/winres/` 下的 winres 配置生成，产物是 `src/rsrc_windows_*.syso`，`go build` 会自动链接：
+
+```bash
+go install github.com/tc-hib/go-winres@latest
+cd src
+go-winres make          # 读取 winres/winres.json，输出 rsrc_windows_amd64.syso / rsrc_windows_386.syso
+```
+
+- 图标源文件：`src/winres/ameath.ico`（当前为 256×256 PNG 压缩的单尺寸 ICO，Explorer 会缩放显示小尺寸；如需 16/32/48/256 多尺寸可另生成）。
+- `winres.json` 中 `RT_GROUP_ICON` 的 value 必须是字符串（`.ico` 路径）；若写成数组，go-winres 会按图片列表解码，报 `image: unknown format`。
+- 清单已声明 `dpi-awareness: system`（与代码里的 `SetProcessDPIAware` 一致）；版本信息 `1.0.0.0`。
+- `.syso` 按架构带后缀（`_windows_amd64` / `_windows_386`），只链接匹配当前 GOARCH 的那个；换架构（如 arm64）需重新 `go-winres make`。
+- 改动图标后需重新 `go-winres make` 再 `go build`。
+
 The module is `github.com/na_me/ameath-go`. Source lives in `src/`, binaries go in the repo root. There is no Makefile or go.sum committed yet — run `go mod tidy` after dependency changes.
 
 Assets (GIFs and MP3/WAV files) are loaded from `assets/` next to the executable (`assetsRoot()` in `action.go`, derived from `os.Executable()`; falls back to `./assets`). Structure: `assets/{petName}/{state}/*.gif` + `*.mp3`/`*.wav`. Each GIF is a separate animation variant (`Anims map[string][]*Animator`); all variants are normalized to a common canvas and feet line (bottom-most opaque row) so nothing jumps. `switchAnim` picks a random variant; in idle, `updateAI` re-picks a random variant every ~10s. Tray icon: `assets/{petName}/icon.ico` or `assets/icon.ico` if present, else generated as a 32×32 ICO from the first idle frame (`icon.go`, stored in `App.TrayIcon` before systray starts).
