@@ -496,6 +496,17 @@ func (a *App) showContextMenu() {
 	}
 	appendMenuString(menu, MF_POPUP, scaleMenu, "缩放")
 
+	volumePresets := []int{25, 50, 75, 100, 150, 200, 300}
+	volumeMenu, _, _ := procCreatePopupMenu.Call()
+	for i, pct := range volumePresets {
+		title := fmt.Sprintf("%d%%", pct)
+		if pct == a.Cfg.VolumePercent {
+			title = "✓ " + title
+		}
+		appendMenuString(volumeMenu, MF_STRING, uintptr(600+i), title)
+	}
+	appendMenuString(menu, MF_POPUP, volumeMenu, "音量")
+
 	appendMenuString(menu, MF_SEPARATOR, 0, "")
 	appendMenuString(menu, MF_STRING, 6, "开机启动")
 	appendMenuString(menu, MF_SEPARATOR, 0, "")
@@ -553,6 +564,13 @@ func (a *App) showContextMenu() {
 		if i := int(cmd - 200); i < len(scalePresets) {
 			if pct := scalePresets[i]; pct != a.Cfg.ScalePercent {
 				a.resizeWindow(pct)
+			}
+		}
+	case cmd >= 600 && cmd < 700:
+		if i := int(cmd - 600); i < len(volumePresets) {
+			if pct := volumePresets[i]; pct != a.Cfg.VolumePercent {
+				a.Cfg.VolumePercent = pct
+				a.saveConfig()
 			}
 		}
 	case cmd >= 400:

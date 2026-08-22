@@ -66,6 +66,19 @@ func OnTrayReady() {
 		scaleMenuItems[pct] = item
 	}
 
+	// 音量子菜单
+	mVolume := systray.AddMenuItem("音量", "")
+	volumePresets := []int{25, 50, 75, 100, 150, 200, 300}
+	volumeMenuItems := make(map[int]*systray.MenuItem)
+	for _, pct := range volumePresets {
+		title := fmt.Sprintf("%d%%", pct)
+		if app.Cfg.VolumePercent == pct {
+			title = "✓ " + title
+		}
+		item := mVolume.AddSubMenuItem(title, "")
+		volumeMenuItems[pct] = item
+	}
+
 	systray.AddSeparator()
 
 	mAutoStart := systray.AddMenuItem("开机启动", "")
@@ -197,6 +210,28 @@ func OnTrayReady() {
 							smi.SetTitle(fmt.Sprintf("✓ %d%%", sp))
 						} else {
 							smi.SetTitle(fmt.Sprintf("%d%%", sp))
+						}
+					}
+				})
+			}
+		}(pct, item)
+	}
+
+	// 音量子菜单事件
+	for pct, item := range volumeMenuItems {
+		go func(percent int, mi *systray.MenuItem) {
+			for range mi.ClickedCh {
+				app.postCmd(func() {
+					if percent == app.Cfg.VolumePercent {
+						return
+					}
+					app.Cfg.VolumePercent = percent
+					app.saveConfig()
+					for vp, vmi := range volumeMenuItems {
+						if vp == percent {
+							vmi.SetTitle(fmt.Sprintf("✓ %d%%", vp))
+						} else {
+							vmi.SetTitle(fmt.Sprintf("%d%%", vp))
 						}
 					}
 				})

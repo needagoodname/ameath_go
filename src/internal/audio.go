@@ -1,11 +1,13 @@
 package internal
 
 import (
+	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
 
 	"github.com/gopxl/beep/v2"
+	"github.com/gopxl/beep/v2/effects"
 	"github.com/gopxl/beep/v2/mp3"
 	"github.com/gopxl/beep/v2/speaker"
 	"github.com/gopxl/beep/v2/wav"
@@ -44,6 +46,11 @@ func (a *App) playSound(name string) {
 	if len(files) == 0 {
 		return
 	}
+	// 0% 视为静音，直接跳过（相当于 mute）
+	pct := a.Cfg.VolumePercent
+	if pct <= 0 {
+		return
+	}
 	file := files[rand.Intn(len(files))]
 	go func() {
 		f, err := os.Open(file)
@@ -72,9 +79,19 @@ func (a *App) playSound(name string) {
 		}
 
 		resampled := beep.Resample(4, format.SampleRate, 44100, s)
+		// 音量：Base=10（分贝制），Volume=log10(pct/100) ⇒ gain=pct/100。
+		// pct 为主线程在 playSound 入口取值，goroutine 内用局部副本。
+		var stream beep.Streamer = resampled
+		if pct != 100 {
+			stream = &effects.Volume{
+				Streamer: resampled,
+				Base:     10,
+				Volume:   math.Log10(float64(pct) / 100.0),
+			}
+		}
 		// 播放完成后才关闭流/文件：speaker.Play 仅入队，音频线程会异步
 		// 从文件读取，提前 Close 会导致读取与关闭竞争而卡死。
-		speaker.Play(beep.Seq(resampled, beep.Callback(func() {
+		speaker.Play(beep.Seq(stream, beep.Callback(func() {
 			s.Close()
 		})))
 	}()
