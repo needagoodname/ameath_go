@@ -344,7 +344,13 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		app.Pet.DragX = int32(int16(lParam & 0xFFFF))
 		app.Pet.DragY = int32(int16(lParam >> 16))
 		procSetCapture.Call(hwnd)
+		wasClick := app.Pet.State == "click"
 		app.switchAnim("click")
+		// 快速连点（仍处于 click 状态）时 switchAnim 因动画相同不会重播音效，
+		// 这里补播点击音效，保证每次点击都响应“嗯”（voice.txt：点击：嗯）。
+		if wasClick {
+			app.playSound("click")
+		}
 		return 0
 
 	case WM_LBUTTONUP:

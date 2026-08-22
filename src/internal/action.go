@@ -409,6 +409,10 @@ func (a *App) SwitchPet(name string) error {
 	// 立即按新尺寸重渲染，避免窗口已变而分层表面仍是旧内容
 	a.render()
 
+	// 切换宠物后播一句“启动”台词（voice.txt：启动），
+	// 与新宠物出场呼应；speakerClear 已清空旧宠物在途音效。
+	a.playSound("start")
+
 	return nil
 }
 
@@ -540,6 +544,9 @@ func (a *App) render() {
 		procShowWindow.Call(p.Hwnd, SW_SHOWNOACTIVATE)
 		a.assertTopmost() // 首帧显示后立刻置顶，避免被其它窗口先盖住
 		println("first render ok at", p.X, ",", p.Y, "size:", p.Width, "x", p.Height)
+		// 启动音效：首帧显示后随机播一句“启动”对应台词
+		// （voice.txt：你，看见我了 / 现实系统，侵入完成 / 一起去拯救世界吧）
+		a.playSound("start")
 	}
 }
 
