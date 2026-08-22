@@ -1,5 +1,7 @@
 package internal
 
+import "time"
+
 // 宠物
 type Pet struct {
 	Name        string
@@ -15,11 +17,13 @@ type Pet struct {
 	DragMoved   bool
 	DragX       int32
 	DragY       int32
-	Anims       map[string][]*Animator
-	CurrentAnim *Animator
-	Sounds      map[string][]string
-	Hwnd        uintptr
-	StateTimer  int
+	// DragActivity 记录最近一次拖拽输入时间，供看门狗强制释放拖拽（见 windows.go）
+	DragActivity time.Time
+	Anims        map[string][]*Animator
+	CurrentAnim  *Animator
+	Sounds       map[string][]string
+	Hwnd         uintptr
+	StateTimer   int
 }
 
 func (a *App) NewPet(name string) {

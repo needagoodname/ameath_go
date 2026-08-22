@@ -132,7 +132,9 @@ func (a *App) maybeFinishBehavior() {
 	if p.Dragging {
 		return
 	}
-	if p.CurrentAnim.CurrentLoop >= 1 {
+	// 播满一圈，或动画已因有限 LoopCount 自行停止（Playing=false）→ 都切回 idle2，
+	// 不依赖单一条件，避免“播完停在某帧不切换”。
+	if p.CurrentAnim.CurrentLoop >= 1 || !p.CurrentAnim.Playing {
 		a.switchToIdle2()
 	}
 }

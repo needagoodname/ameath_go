@@ -2,6 +2,7 @@ package internal
 
 import (
 	"fmt"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -62,6 +63,7 @@ const (
 	WM_LBUTTONUP        = 0x0202
 	WM_RBUTTONUP        = 0x0205
 	WM_MOUSEMOVE        = 0x0200
+	WM_CAPTURECHANGED   = 0x0215
 	WM_TIMER            = 0x0113
 	WM_PAINT            = 0x000F
 	WM_DESTROY          = 0x0002
@@ -229,6 +231,12 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 
 	case WM_TIMER:
 		if wParam == 1 {
+			// 拖拽看门狗：超过 10s 无鼠标输入仍处于拖拽则强制释放，
+			// 兜底 WM_LBUTTONUP / WM_CAPTURECHANGED 都未收到的情况，
+			// 避免 Dragging 卡死导致所有动作无法结束/切回 idle。
+			if app.Pet.Dragging && time.Since(app.Pet.DragActivity) > 10*time.Second {
+				app.releaseDrag()
+			}
 			if !app.Paused {
 				if app.Pet.CurrentAnim != nil {
 					app.Pet.CurrentAnim.Update()
@@ -255,27 +263,36 @@ func wndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 	case WM_LBUTTONDOWN:
 		app.Pet.Dragging = true
 		app.Pet.DragMoved = false
+		app.Pet.DragActivity = time.Now()
 		app.Pet.DragX = int32(int16(lParam & 0xFFFF))
 		app.Pet.DragY = int32(int16(lParam >> 16))
 		procSetCapture.Call(hwnd)
+		app.Away = false // 交互时立即恢复渲染
 		app.switchAnim("click")
 		return 0
 
 	case WM_LBUTTONUP:
-		app.Pet.Dragging = false
-		procReleaseCapture.Call(hwnd)
+		moved := app.Pet.DragMoved
+		app.releaseDrag()
 		app.Cfg.WindowX = app.Pet.X
 		app.Cfg.WindowY = app.Pet.Y
 		app.saveConfig()
 		// 快速点击（未拖动）保持 click 状态，让反应动画可见；
 		// 拖动结束则立即回到 idle2。
-		if app.Pet.DragMoved {
+		if moved {
 			app.switchToIdle2()
 		}
 		return 0
 
+	case WM_CAPTURECHANGED:
+		// 鼠标捕获被系统或其他窗口夺走（通常意味着在窗口外释放 / Alt-Tab 等），
+		// 立即结束拖拽，避免 Dragging 永久卡死导致动作无法切回 idle。
+		app.releaseDrag()
+		return 0
+
 	case WM_MOUSEMOVE:
 		if app.Pet.Dragging {
+			app.Pet.DragActivity = time.Now()
 			x := int32(int16(lParam & 0xFFFF))
 			y := int32(int16(lParam >> 16))
 			app.Pet.X += x - app.Pet.DragX
@@ -487,6 +504,7 @@ func (a *App) checkOcclusion() bool {
 		{p.X + p.Width/2, p.Y + p.Height/4},
 		{p.X + p.Width/2, p.Y + 3*p.Height/4},
 	}
+	checked := 0
 	for _, pt := range pts {
 		// 屏幕坐标换算为精灵坐标检查透明度
 		sx := int(pt.X-p.X) * int(p.BaseWidth) / int(p.Width)
@@ -497,10 +515,16 @@ func (a *App) checkOcclusion() bool {
 		if frame.RGBAAt(sx, sy).A < 32 {
 			continue
 		}
+		checked++
 		h, _, _ := procWindowFromPoint.Call(uintptr(uint32(pt.X)) | uintptr(uint32(pt.Y))<<32)
 		if h == p.Hwnd {
 			return false
 		}
+	}
+	// 没有任何可判定的不透明采样点（透明/越界）：不能断言被遮挡，
+	// 避免 checkOcclusion 误报导致 render 被跳过、画面冻结。
+	if checked == 0 {
+		return false
 	}
 	return true
 }
