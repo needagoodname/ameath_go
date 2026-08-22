@@ -201,6 +201,13 @@ func (a *App) updateMovement() {
 		return
 	}
 
+	// 记录行进方向：向右用原帧，向左用水平镜像帧（render 里取镜像）。
+	if dx > 0 {
+		p.FacingRight = true
+	} else if dx < 0 {
+		p.FacingRight = false
+	}
+
 	speed := 2.0 // px/帧 ≈ 120px/s
 	if dist <= speed {
 		p.X = p.TargetX
@@ -491,7 +498,8 @@ func (a *App) render() {
 		return
 	}
 
-	// 命中 scaled 缓存时，render 退化为单次 copy（DIB 自顶向下、BGRA 与缓存布局一致）
+	// 命中 scaled 缓存时，render 退化为单次 copy（DIB 自顶向下、BGRA 与缓存布局一致）。
+	// 宠物朝左（FacingRight=false）时取水平镜像缓存，朝右用原帧。
 	anim.ensureScaled(int(p.Width), int(p.Height))
 	if anim.Current >= len(anim.scaled) {
 		if !renderDbg.scaled {
@@ -500,8 +508,19 @@ func (a *App) render() {
 		}
 		return
 	}
+	var buf []byte
+	if p.FacingRight {
+		buf = anim.scaled[anim.Current]
+	} else {
+		anim.ensureScaledMirror(int(p.Width), int(p.Height))
+		if anim.Current < len(anim.scaledMirror) {
+			buf = anim.scaledMirror[anim.Current]
+		} else {
+			buf = anim.scaled[anim.Current] // 镜像缓存缺失时兜底用原帧
+		}
+	}
 	pixels := unsafe.Slice((*byte)(renderBits), int(p.Width)*int(p.Height)*4)
-	copy(pixels, anim.scaled[anim.Current])
+	copy(pixels, buf)
 
 	blend := BLENDFUNCTION{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA}
 	src := POINT{0, 0}

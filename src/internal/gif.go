@@ -33,6 +33,9 @@ type Animator struct {
 	scaled  [][]byte
 	scaledW int
 	scaledH int
+	// scaledMirror 是 scaled 的水平镜像缓存（宠物朝左行走时用），
+	// 由 ensureScaledMirror 惰性构建，尺寸变化时一并失效。
+	scaledMirror [][]byte
 }
 
 func (a *Animator) Update() {
@@ -183,6 +186,7 @@ func (a *Animator) normalizeFrames(w, h, oy int) {
 	a.Width = w
 	a.Height = h
 	a.scaled = nil
+	a.scaledMirror = nil
 	a.scaledW = 0
 	a.scaledH = 0
 }
@@ -213,6 +217,7 @@ func (a *Animator) ensureScaled(dstW, dstH int) {
 		return
 	}
 	a.scaled = make([][]byte, len(a.Frames))
+	a.scaledMirror = nil // 尺寸变化时镜像缓存一并失效
 	srcW := a.Width
 	srcH := a.Height
 	for i := range a.Frames {
@@ -234,4 +239,33 @@ func (a *Animator) ensureScaled(dstW, dstH int) {
 	}
 	a.scaledW = dstW
 	a.scaledH = dstH
+}
+
+// ensureScaledMirror 按 dstW×dstH 重建水平镜像的预缩放 BGRA 帧缓存
+// （宠物朝左行走时使用）。与 ensureScaled 仅采样方向相反，惰性构建：
+// 只有实际朝左移动时才占一份额外缓存。
+func (a *Animator) ensureScaledMirror(dstW, dstH int) {
+	if a.scaledMirror != nil && a.scaledW == dstW && a.scaledH == dstH {
+		return
+	}
+	a.scaledMirror = make([][]byte, len(a.Frames))
+	srcW := a.Width
+	srcH := a.Height
+	for i := range a.Frames {
+		src := a.Frames[i].BGRA
+		out := make([]byte, dstW*dstH*4)
+		for dy := 0; dy < dstH; dy++ {
+			sy := dy * srcH / dstH
+			for dx := 0; dx < dstW; dx++ {
+				sx := (dstW - 1 - dx) * srcW / dstW
+				si := (sy*srcW + sx) * 4
+				di := (dy*dstW + dx) * 4
+				out[di] = src[si]
+				out[di+1] = src[si+1]
+				out[di+2] = src[si+2]
+				out[di+3] = src[si+3]
+			}
+		}
+		a.scaledMirror[i] = out
+	}
 }
