@@ -114,9 +114,12 @@ func loadGIF(path string) (*Animator, error) {
 			}
 		}
 
-		// 记录绘制前的画布快照，供 DisposalPrevious 恢复
-		snapshots[i] = image.NewRGBA(canvas.Bounds())
-		draw.Draw(snapshots[i], snapshots[i].Bounds(), canvas, image.Point{}, draw.Src)
+		// 画布快照按需生成：仅当下一帧声明 DisposalPrevious（需恢复本帧
+		// 绘制前的画布）时才整画布拷贝一份，其余帧不建快照，降低解码峰值内存。
+		if i+1 < len(g.Image) && g.Disposal[i] == gif.DisposalPrevious {
+			snapshots[i] = image.NewRGBA(canvas.Bounds())
+			draw.Draw(snapshots[i], snapshots[i].Bounds(), canvas, image.Point{}, draw.Src)
+		}
 
 		// 绘制当前帧
 		draw.Draw(canvas, bounds, srcImg, bounds.Min, draw.Over)
@@ -189,6 +192,15 @@ func (a *Animator) normalizeFrames(w, h, oy int) {
 	a.scaledMirror = nil
 	a.scaledW = 0
 	a.scaledH = 0
+}
+
+// releaseFrameImages 释放每帧的原始 RGBA 图像（render 只消费 BGRA/scaled
+// 缓存）。调用时机：托盘图标生成之后 / 宠物切换完成后。此后 Frame.Image 均为
+// nil，每帧省一份 RGBA 副本（约 1/4 动画内存）。
+func (a *Animator) releaseFrameImages() {
+	for i := range a.Frames {
+		a.Frames[i].Image = nil
+	}
 }
 
 // rgbaToBGRA 将 RGBA 帧转为 BGRA 字节流（Win32 DIB 期望的布局）。

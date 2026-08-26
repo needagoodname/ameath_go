@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"time"
 	"unsafe"
@@ -368,6 +369,20 @@ func (a *App) LoadResources() error {
 	return nil
 }
 
+// ReleaseFrameImages 释放所有动画的原始 RGBA 帧图像（仅主线程调用）。
+// 托盘图标已生成 / 宠物切换完成、render 只消费 BGRA/scaled 缓存后调用，
+// 每帧省一份 RGBA 副本（约 1/4 动画内存）。
+func (a *App) ReleaseFrameImages() {
+	if a.Pet == nil {
+		return
+	}
+	for _, vs := range a.Pet.Anims {
+		for _, anim := range vs {
+			anim.releaseFrameImages()
+		}
+	}
+}
+
 // SwitchPet 切换到另一个宠物（失败时回滚，原状态不受影响）
 func (a *App) SwitchPet(name string) error {
 	p := a.Pet
@@ -412,6 +427,10 @@ func (a *App) SwitchPet(name string) error {
 
 	// 立即按新尺寸重渲染，避免窗口已变而分层表面仍是旧内容
 	a.render()
+
+	// 新资源已渲染，原始 RGBA 帧图像不再需要；释放并归还解码峰值内存
+	a.ReleaseFrameImages()
+	debug.FreeOSMemory()
 
 	// 切换宠物后播一句“启动”台词（voice.txt：启动），
 	// 与新宠物出场呼应；speakerClear 已清空旧宠物在途音效。

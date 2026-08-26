@@ -3,6 +3,7 @@ package main
 import (
 	"math/rand"
 	"runtime"
+	"runtime/debug"
 	"time"
 
 	"github.com/getlantern/systray"
@@ -53,6 +54,11 @@ func main() {
 
 	// 先建窗口再启托盘，保证 postCmd 投递时 hwnd 已存在
 	app.CreateWindow()
+
+	// 启动期资源（GIF 解码峰值 / 托盘图标首帧）已就绪：释放原始 RGBA 帧图像，
+	// 并归还 GC 高峰内存，避免 RSS 停在启动峰值
+	app.ReleaseFrameImages()
+	debug.FreeOSMemory()
 
 	// 启动系统托盘和窗口消息循环
 	go systray.Run(internal.OnTrayReady, internal.OnTrayExit)
