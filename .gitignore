@@ -1,0 +1,10 @@
+# 构建产物（不提交二进制，改用 Releases 分发）
+*.exe
+*.dll
+*.zip
+*.7z
+*.tar.gz
+
+# 系统 / 编辑器文件
+.DS_Store
+Thumbs.db
